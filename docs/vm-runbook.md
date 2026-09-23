@@ -1,84 +1,143 @@
 # 메신저 VM 생성·접속
 
-## 입력값과 고정 구성
+현재 환경 값은 [env.md](env.md)가 정본이다. 이 문서는 같은 환경을 처음부터 다시 만드는 절차다. 모든 PowerShell 명령은 **관리자 PowerShell**에서, 저장소 루트에서 실행한다.
 
-| 값 | 채울 내용 |
+## 고정 구성
+
+| 항목 | 값 |
 | --- | --- |
-| 외부 스위치 이름 | 미정 |
-| Windows 물리 어댑터 이름(스위치 신규 생성 때만) | 미정 |
-| VM 주소/CIDR | 미정. 예: 192.168.50.40/24 |
-| LAN 게이트웨이 | 미정. 예: 192.168.50.1 |
-| DNS | 미정. 예: 192.168.50.1 |
-| 허용할 클라이언트 IP/CIDR | 미정 |
+| VM | `j-messenger-lab`, Gen 2, 1 vCPU, 설치 중 RAM 2 GiB → 설치 후 1 GiB 고정, 20 GiB VHDX, 고정 MAC `00155D004206` |
+| 네트워크 | Internal 스위치 `JMessengerInternal`, 호스트 `10.77.0.1/24`, NAT `JMessengerNat` `10.77.0.0/24`, VM `10.77.0.10` |
+| DNS | 8.8.8.8, 1.1.1.1 |
+| 관리자 / 앱 계정 | `jjm`(wheel) / `jmsg`(sudo 없음) |
 
-VM 이름은 j-messenger-lab, 2세대, 1 vCPU, 20 GiB VHDX다. 설치 중 RAM 2 GiB, 설치 후 고정 1 GiB를 쓴다. 외부 스위치에 물려 LAN의 사설 IP를 게스트 안에서 직접 설정한다. 이 방식은 WSL이 기본 NAT이든 미러 모드든 LAN 경로로 VM에 접속할 수 있는지 확인하기 쉽다. 호스트·WSL·VM의 실제 방화벽/라우팅 정책에 따라 접속 검증은 필수다.
+Rocky 공식 문서 기준으로 텍스트 설치는 RAM 2 GB, 최소 서버 구성은 1 GB다. 그래서 1 GiB는 설치 후 운영 값으로만 쓴다. CPU는 x86_64-v3(AVX2 등)가 필요하다. 호스트 Ryzen 7 5700U는 이 조건을 충족한다. 호스트 여유 메모리가 부족하면 VM 시작이 `unable to allocate 2048 MB of RAM (0x800705AA)`로 실패한다. 이때는 다른 프로그램을 닫거나 `-InstallMemoryMB 1536`을 쓴다.
 
-Rocky 공식 문서는 텍스트 설치에 RAM 2 GiB를 적고, 최소 서버 구성 표에는 1 GiB를 적는다. 따라서 1 GiB는 **설치 후 실험 기준**이며 안정성이 확인된 값이 아니다. 설치·운영 실패 시 2 GiB로 되돌리고 측정값을 남긴다. CPU는 Rocky 10의 x86_64-v3 요건을 충족해야 한다.
-
-## 1. 사전 확인
-
-1. Windows 관리자 PowerShell에서 Hyper-V 활성화 및 외부 스위치 후보 확인: Get-VMSwitch, Get-NetAdapter.
-2. LAN 관리자 또는 공유기에서 사용 중이지 않은 사설 IP와 CIDR·게이트웨이·DNS를 확인한다. DHCP 풀과 겹치지 않게 예약하거나 범위 밖을 사용한다.
-3. [Rocky 공식 다운로드](https://rockylinux.org/download)에서 10 x86_64 Minimal ISO를 받는다. [공식 설치 안내](https://docs.rockylinux.org/guides/installation/)의 CHECKSUM과 Get-FileHash 결과를 대조한다.
-4. 외부 스위치 신규 생성은 물리 어댑터 연결을 잠시 끊을 수 있으므로, 작업 중인 접속을 저장한다. 기존 외부 스위치가 있으면 그것을 사용한다.
-
-## 2. VM 생성
-
-관리자 PowerShell에서, **실제 ISO·스위치·어댑터 이름으로 바꿔** 실행한다.
+## 1. ISO 준비
 
 ```powershell
-.\scripts\New-MessengerVm.ps1 -Phase Create -IsoPath 'C:\ISO\Rocky-10-x86_64-minimal.iso' -SwitchName 'LabExternal' -AdapterName 'Ethernet'
-Get-VM -Name 'j-messenger-lab'
-Get-VMMemory -VMName 'j-messenger-lab'
-Get-VMProcessor -VMName 'j-messenger-lab'
-Start-VM -Name 'j-messenger-lab'
-vmconnect.exe localhost 'j-messenger-lab'
+New-Item -ItemType Directory -Force D:\ISO | Out-Null
+curl.exe -fL -o D:\ISO\Rocky-10.2-x86_64-minimal.iso https://download.rockylinux.org/pub/rocky/10/isos/x86_64/Rocky-10.2-x86_64-minimal.iso
+(Get-FileHash D:\ISO\Rocky-10.2-x86_64-minimal.iso -Algorithm SHA256).Hash
 ```
 
-스위치가 이미 있으면 -AdapterName을 생략한다. 스크립트는 기존 VM을 덮어쓰지 않고, 비어 있지 않은 VM 경로에는 생성하지 않는다. ISO 부팅 뒤 Rocky 설치 화면에서 Minimal 설치·20 GiB 디스크·관리 계정·SSH 서버를 설정한다. 암호나 키는 저장소에 적지 않는다.
+해시를 `https://download.rockylinux.org/pub/rocky/10/isos/x86_64/CHECKSUM`의 값과 대조한다. 10.2 minimal의 값은 `aac6ac3ce781b91a91ce78463405f66c611a5dca4b3840c79e5e01d97302f6c8`이다.
 
-## 3. 게스트 고정 IP
-
-Rocky 콘솔에서 연결 프로필 이름을 찾는다.
-
-```bash
-nmcli -t -f NAME,DEVICE connection show
-```
-
-저장소의 scripts/Configure-GuestNetwork.sh를 게스트에 복사하거나 같은 내용을 콘솔에서 실행한다. IP·게이트웨이·DNS·프로필명을 실제 값으로 교체한다.
-
-```bash
-sudo bash Configure-GuestNetwork.sh 192.168.50.40/24 192.168.50.1 192.168.50.1 'System eth0'
-ip -4 address show
-ip -4 route show
-ping -c 2 192.168.50.1
-```
-
-예시 주소를 그대로 쓰지 않는다. 초기에는 콘솔에서 파일을 직접 옮기기 어려우므로, 동일한 NetworkManager 설정을 콘솔의 nmtui에서 입력해도 된다. 재부팅 뒤 같은 IP가 유지되는지 확인한다.
-
-## 4. 설치 후 1 GiB로 고정
-
-게스트를 정상 종료한 뒤 VM 상태가 Off인지 확인하고 관리자 PowerShell에서 실행한다.
+## 2. 스위치·NAT·VM 생성
 
 ```powershell
-.\scripts\New-MessengerVm.ps1 -Phase Finalize -VmName 'j-messenger-lab'
-Get-VMMemory -VMName 'j-messenger-lab'
-Start-VM -Name 'j-messenger-lab'
+.\scripts\New-MessengerVm.ps1 -Phase Create -IsoPath D:\ISO\Rocky-10.2-x86_64-minimal.iso
+Start-VM -Name j-messenger-lab
+vmconnect.exe localhost j-messenger-lab
 ```
 
-Finalize는 동적 메모리를 끄고 1 GiB로 맞추며 ISO를 분리하고 디스크를 첫 부팅 장치로 둔다. 메모리 부족이나 서비스 재시작이 관측되면 정상 종료 후 Set-VMMemory -VMName 'j-messenger-lab' -DynamicMemoryEnabled $false -StartupBytes 2GB로 올리고 검증 기록에 남긴다.
+스크립트는 기존 VM을 덮어쓰지 않고, 비어 있지 않은 VM 경로에는 만들지 않는다. 스위치와 NAT가 이미 있으면 그대로 쓴다.
 
-## 5. 접속·서비스 검증
+## 3. Rocky 설치 화면
 
-Windows에서 Test-NetConnection 192.168.50.40 -Port 22, WSL에서 다음을 확인한다.
+| 화면 | 입력 |
+| --- | --- |
+| Software Selection | Minimal Install |
+| Installation Destination | 20 GiB 디스크, 자동 파티션 |
+| Network & Host Name | 호스트명 `j-messenger-lab`. IPv4 Manual: 주소 `10.77.0.10`, netmask `255.255.255.0`, gateway `10.77.0.1`, DNS `8.8.8.8`. 자동 연결 켜기 |
+| User Creation | `jjm`, 관리자로 설정 체크, 비밀번호 설정 (저장소에 적지 않음) |
+| Root | 잠금 유지 |
+
+설치가 끝나면 **Reboot 대신 VM을 끈다**(`Stop-VM j-messenger-lab`). 첫 부팅 장치가 아직 ISO라서 재부팅하면 설치 화면으로 다시 들어간다.
+
+## 4. 설치 후 고정·경로 설정
+
+```powershell
+.\scripts\New-MessengerVm.ps1 -Phase Finalize
+.\scripts\New-MessengerVm.ps1 -Phase Route -Persist
+Start-VM -Name j-messenger-lab
+```
+
+- **Finalize:** ISO 분리, 디스크 부팅, RAM 1 GiB 고정, 자동 체크포인트 끔.
+- **Route -Persist:** WSL과 VM 스위치 어댑터의 IPv4 forwarding을 켠다. 또 예약 작업 `j-messenger WSL-VM forwarding`을 등록한다. 이 작업은 SYSTEM 권한으로 부팅 시와 1분마다 실행된다.
+
+## 5. WSL 준비 (한 번만)
 
 ```bash
-ip route
-ssh <게스트-사용자>@192.168.50.40
-curl -fsS http://192.168.50.40:3000/health
+ssh-keygen -t ed25519 -N '' -C 'jjm@wsl j-messenger' -f ~/.ssh/id_ed25519_jm
+cat >> ~/.ssh/config <<'EOF'
+
+Host jm-vm
+  HostName 10.77.0.10
+  User jmsg
+  IdentityFile ~/.ssh/id_ed25519_jm
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+  ConnectTimeout 5
+
+Host jm-vm-admin
+  HostName 10.77.0.10
+  User jjm
+  IdentityFile ~/.ssh/id_ed25519_jm
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+  ConnectTimeout 5
+EOF
+chmod 600 ~/.ssh/config
+cat ~/.ssh/id_ed25519_jm.pub
 ```
 
-서버 구현 전에는 SSH까지만 확인한다. HTTP는 개발용 /health 확인에만 쓴다. 실제 메일 계정의 비밀번호를 보내기 전에는 계획의 T01~T04에서 HTTPS/WSS·인증서 신뢰·세션 보호를 완료한다. 게스트 방화벽에서는 **허용된 클라이언트 주소만** 서비스 포트에 접근시킨다. 실패 시 게스트 주소·게이트웨이, Windows/WSL 경로, 게스트 방화벽 순서로 확인한다. WSL 접속이 막히면 VM 구성 완료로 표시하지 않는다.
+## 6. VM 콘솔에서 키 등록과 sudo 설정
+
+vmconnect에서 `jjm`으로 로그인한 뒤 실행한다. 공개키는 5단계 출력값으로 바꾼다. 긴 줄은 vmconnect 메뉴 Clipboard → Type clipboard text로 붙여 넣을 수 있다. Claude는 Hyper-V `Msvm_Keyboard`로 키를 하나씩 입력했다. `TypeText`는 문자가 깨지므로 쓰지 않는다.
+
+```bash
+install -d -m 700 ~/.ssh && echo '<공개키 한 줄>' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+echo 'jjm ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/90-jjm >/dev/null && sudo chmod 0440 /etc/sudoers.d/90-jjm && sudo visudo -cq && echo SUDO_OK
+```
+
+비밀번호 없는 sudo는 실험용 VM의 관리 자동화를 위한 선택이다. 그 대신 SSH는 키 인증만 허용하고, `jjm` 키는 WSL에만 둔다.
+
+## 7. VM 설정 (WSL에서)
+
+```bash
+cd /mnt/d/workspace/test-space/github/j-messenger
+ssh jm-vm-admin "sudo bash -s -- '$(cat ~/.ssh/id_ed25519_jm.pub)'" < scripts/Provision-MessengerVm.sh
+```
+
+`Provision-MessengerVm.sh`는 여러 번 실행해도 결과가 같다. 하는 일:
+- 호스트명·시간대 설정
+- `nodejs`·`tar`·`hyperv-daemons` 설치
+- `jmsg` 계정과 SSH 키, linger 설정
+- 앱 디렉터리, `server.env`, 사용자 서비스 유닛 생성
+- SSH 비밀번호 로그인 차단
+- 방화벽 존 `jm-clients` 생성
+- 고정 IP 프로필 `jm-internal` 생성 (다음 부팅부터 적용)
+
+네트워크 프로필을 바꾼 경우에는 `ssh jm-vm-admin sudo reboot`로 한 번 재부팅한다.
+
+IP를 나중에 바꿀 때는 VM 안에서 `sudo bash Configure-GuestNetwork.sh <IPv4/CIDR> <gateway> <DNS> jm-internal`을 쓴다. 바꾼 값은 env.md, `~/.ssh/config`, 방화벽에도 반영한다.
+
+## 8. 연결 검증
+
+```bash
+ping -c2 10.77.0.10
+ssh jm-vm id -un                       # jmsg
+ssh jm-vm-admin hostname               # j-messenger-lab
+ssh jm-vm 'systemd-run --user --unit jm-smoke --collect /usr/bin/node -e "require(\"node:http\").createServer((q,s)=>s.end(\"ok\")).listen(3000)"'
+curl -fsS http://10.77.0.10:3000/      # ok
+ssh jm-vm 'systemctl --user stop jm-smoke'
+```
+
+Windows에서는 `Test-NetConnection 10.77.0.10 -Port 22`로 확인한다. 결과는 [verification.md](verification.md)에 남긴다.
+
+## 되돌리기 (환경 전체 삭제)
+
+아래 명령은 VM 디스크와 설정을 되돌릴 수 없게 지운다. 실행 전에 필요한 데이터가 없는지 확인한다.
+
+```powershell
+Stop-VM j-messenger-lab -TurnOff -ErrorAction SilentlyContinue
+Remove-VM j-messenger-lab -Force
+Remove-Item -Recurse -Force "$env:PUBLIC\Documents\Hyper-V\j-messenger-lab"
+Unregister-ScheduledTask -TaskName 'j-messenger WSL-VM forwarding' -Confirm:$false
+Remove-NetNat -Name JMessengerNat -Confirm:$false
+Remove-VMSwitch -Name JMessengerInternal -Force
+```
 
 ## 근거
 
@@ -86,3 +145,4 @@ curl -fsS http://192.168.50.40:3000/health
 - [Rocky Linux 10 설치와 ISO 검증](https://docs.rockylinux.org/guides/installation/)
 - [Hyper-V Linux용 보안 부팅 템플릿](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/learn-more/Generation-2-virtual-machine-security-settings-for-Hyper-V)
 - [WSL 네트워크 모드와 호스트 접근](https://learn.microsoft.com/en-us/windows/wsl/networking)
+- [Windows Server 2019 Hyper-V에서 Rocky 10 부팅 실패(x86_64-v3)](https://forums.rockylinux.org/t/rocky-linux-10-x-install-iso-wont-boot-on-windows-server-2019/20613)

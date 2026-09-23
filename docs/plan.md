@@ -2,139 +2,113 @@
 
 ## 목표
 
-Rocky Linux 10 VM의 Node 서버와 웹 UI를 먼저 만든다. 메일 서버 계정으로 인증하고 **같은 메일 서버에 속한 사용자끼리만** 개인·단체 대화를 한다. 파일, 읽음, 보존 기간, Windows·Android 앱과 종료 상태 알림은 후속 단계다. 접속은 허용된 사설망으로 제한한다.
+Rocky Linux 10 VM의 Node 서버와 웹 UI를 먼저 만든다. 메일 서버 계정으로 인증하고 **같은 메일 서버에 속한 사용자끼리만** 개인·단체 대화를 한다. 파일, 읽음, 보존 기간, Windows·Android 앱, 종료 상태 알림은 후속 단계다. 접속은 허용된 사설망으로 제한한다.
 
-1차 통합 완료: **실제 메일 서버 계정으로 HTTPS 로그인한 두 브라우저가 VM 서버를 통해 메시지를 주고받고, 새로고침·서버 재시작 뒤에도 기록이 남는다.** 메일 서버 종류와 공식 인증 수단이 정해지기 전에는 개발용 가짜 계정만 쓰며 통합 완료로 표시하지 않는다.
+1차 통합 완료: **실제 메일 서버 계정으로 HTTPS 로그인한 두 브라우저가 VM 서버를 통해 메시지를 주고받고, 새로고침·서버 재시작 뒤에도 기록이 남는다.** 메일 서버 종류가 확정되기 전에는 개발용 계정만 쓰며 통합 완료로 표시하지 않는다.
 
-## 먼저 확정할 입력
+## 역할 분담
 
-| 항목 | 기준 | 확정 방법 |
+| 누구 | 하는 일 |
+| --- | --- |
+| Claude (planner) | 결정, 작업 명세(`docs/tasks/*.md`), `.ctx/TASKS.md` 배치 교체, 막힘 해소, 배치 검토, VM·호스트 인프라(sudo 필요한 모든 일) |
+| OpenCode + 작은 모델 (executor) | `.ctx/TASKS.md`의 작업을 위에서부터 하나씩 구현·검증·커밋. 질문하지 않고, 불명확하면 blocked로 멈춤 |
+| 사람 | VM 콘솔 비밀번호 입력, 메일 서버 정보 제공(P01), 인증서 신뢰 설치, 최종 확인 |
+
+작업 흐름과 규칙은 [AGENTS.md](../AGENTS.md)와 ctx-relay 스킬이 정한다. 환경 값은 [env.md](env.md)가 정본이다.
+
+## 결정 기록
+
+아래는 Claude가 확정한 값이다. executor는 다시 논의하지 않고 그대로 따른다. 바꿀 때는 planner가 이 표와 관련 명세를 함께 고친다.
+
+### 인프라
+
+| ID | 결정 | 근거 |
 | --- | --- | --- |
-| 메일 서버 | 미지정 | 제품명·버전, 공식 인증/사용자 조회 문서, 시험 계정 2개와 다른 서버의 계정 1개 |
-| 네트워크 | VM 고정 사설 IP, WSL→VM 접속 | 외부 Hyper-V 스위치, 비어 있는 사설 IP/CIDR, 게이트웨이, DNS를 현장값으로 입력 |
-| VM | Rocky Linux 10 Minimal, Gen 2, 1 vCPU, 20 GiB | 설치 중 RAM 2 GiB, 설치 후 1 GiB 고정. 불안정하면 2 GiB로 기록·상향 |
-| 서버 | Node 단일 프로세스, SQLite, HTTP API + WebSocket | 초기 부하 측정 후 변경할 때만 근거 기록 |
-| 웹 | TypeScript + Vite + 기본 DOM/CSS | UI 의존성을 작게 유지 |
-| 메시지 | 서버가 ID·순서·시각 부여 | 클라이언트 임시 ID로 재시도 중복 방지 |
-| 수치 목표 | 미정 | 실제 이용 인원·동시 접속·파일 크기·보존 기간을 받은 뒤 확정 |
+| E1 | VM은 Hyper-V Internal 스위치 `JMessengerInternal` + 호스트 NAT `JMessengerNat` 10.77.0.0/24. 호스트 10.77.0.1, VM 10.77.0.10 고정 | 회사 LAN(FortiGate) IP 점유·충돌 회피. 노트북 네트워크가 바뀌어도 주소 불변 |
+| E2 | WSL(NAT 모드) → VM은 호스트 IPv4 forwarding. 예약 작업이 1분마다 복구 | WSL 어댑터가 재시작마다 새로 생김. 실측으로 확인 |
+| E3 | VM 1 vCPU, RAM 1 GiB 고정, 스왑 2 GiB, 20 GiB 디스크 | 요구된 최소 환경. 설치만 2 GiB |
+| E4 | 관리자 `jjm`(Claude 전용), 앱 계정 `jmsg`(sudo 없음). executor는 `ssh jm-vm`만 쓴다 | 작은 모델에게 root 권한을 주지 않음 |
+| E5 | 서버는 `jmsg`의 systemd **사용자** 서비스 `j-messenger`(linger). 재시작은 sudo 없이 `systemctl --user` | 배포 작업에서 sudo 제거 |
+| E6 | 배포는 WSL에서 `tar`를 SSH로 보내고 VM에서 `npm ci --omit=dev` | rsync 불필요, VM은 NAT로 npm 접근 가능 |
+| E7 | VM 방화벽: 10.77.0.0/24, 172.16.0.0/12만 ssh·3000 허용. HTTPS는 3443 | 호스트·WSL 외 접근 차단. 사용자 서비스는 1024 미만 포트 불가 |
 
-브라우저가 임의로 지정한 메일 서버 주소에 서버가 접속하게 하지 않는다. 서버 관리자가 허용한 메일 서버 ID와 접속 설정만 사용한다. 자격 증명은 인증 어댑터로만 전달하고 메시지 DB·로그에 저장하지 않는다.
+### 공통 코드 규칙
 
-## 단계
+| ID | 결정 |
+| --- | --- |
+| C1 | Node 22 (WSL 22.22.2, VM 22.23.2). TypeScript는 Node 타입 제거로 직접 실행. ts-node·tsx·Babel·빌드 산출물 없음(웹은 Vite 빌드) |
+| C2 | TypeScript 5.9.3 strict. 로컬 import는 `.ts` 확장자 포함. enum·namespace·생성자 매개변수 속성·데코레이터 금지(`erasableSyntaxOnly`). 타입 import는 `import type` |
+| C3 | 테스트는 `node:test` + `node:assert/strict`. 테스트 파일은 별도 선행 작업에서 만들고, 구현 작업은 테스트 파일을 수정하지 못한다 |
+| C4 | 새 의존성 금지. 허용 패키지는 명세에 버전까지 적힌 것뿐: vite 7.3.6, typescript 5.9.3, happy-dom 20.14.5, (서버) ws 8.21.3 |
+| C5 | UI 문구는 한국어, 코드·주석·커밋·`.ctx` 파일은 영어. LF, UTF-8, 2칸 들여쓰기, 작은따옴표, 세미콜론 |
+| C6 | 시각은 UTC ISO 8601(`Z`)로 저장·전송, 화면은 Asia/Seoul. 시간 `HH:mm`(24시간), 날짜 구분선 `YYYY-MM-DD` |
 
-1. **웹 UI 데모:** 정적 화면과 로컬 가짜 데이터. 인증·전송을 보여 줄 때는 데모임을 표시.
-2. **VM 기반:** 고정 IP의 Rocky Minimal 설치, WSL→VM SSH/HTTP 확인. [VM 안내](vm-runbook.md) 사용.
-3. **서버 기본 기능:** 개발 계정으로 대화·저장·조회·실시간 수신·재연결 검증.
-4. **메일 인증 통합:** 대상 제품 공식 문서에 근거한 어댑터와 메일 서버별 사용자 경계 검증. 이때 1차 완료 판정.
-5. **후속 기능:** 파일·읽음·보존 기간, Windows·Android, 종료 상태 알림, 부하·장애 시험.
+### 웹 (배치 W)
 
-### API 계약 초안
+| ID | 결정 |
+| --- | --- |
+| W1 | Vite + TypeScript + 순수 DOM. UI 프레임워크·CSS 프레임워크 없음 |
+| W2 | 화면 코드는 전역 `document`/`window`를 쓰지 않고 `root.ownerDocument`로 요소를 만든다(`main.ts`만 예외). Node + happy-dom 테스트를 위해서 |
+| W3 | 텍스트는 `textContent`로만 넣는다. `innerHTML`류 금지 |
+| W4 | 백엔드 경계는 `web/src/types.ts`의 `MessengerApi` 인터페이스. 데모는 메모리 구현 `createDemoApi()`, 서버 연결 단계에서 HTTP 구현을 추가해 교체 |
+| W5 | 메시지 최대 4000자(앞뒤 공백 제거 후 `string.length`). Enter 전송, Shift+Enter 줄바꿈, 한글 조합 중(`isComposing`) Enter 무시 |
+| W6 | 레이아웃: 데스크톱은 목록 280px + 대화. 640px 이하는 한 화면씩(`data-pane="list"|"chat"`) |
+| W7 | 데모 데이터는 명세에 고정된 표본(서버 2, 사용자 5, 대화 3, 메시지 7). 데모 로그인은 표본 아이디 + 비어 있지 않은 아무 비밀번호 |
 
-- GET /health: 상태만 응답. 내부 경로나 인증 정보는 내보내지 않는다.
-- POST /session: serverId, username, password를 받고 서버 세션 쿠키 발급. serverId는 허용 목록에서만 선택.
-- GET /me, POST /logout: 본인 조회와 세션 폐기.
-- GET /conversations, POST /conversations: 본인 대화만 조회·생성. 단체 참여자는 같은 serverId만 허용.
-- GET /conversations/:id/messages?before=<id>&limit=50: 과거 메시지 조회. 비참여자 거부.
-- POST /conversations/:id/messages: clientMessageId와 text를 받음. 같은 보낸 사람의 중복 ID는 원래 메시지를 반환.
-- GET /events: WebSocket 세션 검증 후 본인 대화의 새 메시지만 전송. 재접속 뒤 HTTP 조회로 누락 복구.
-- 모든 조회는 serverId와 현재 사용자 권한을 조건에 포함한다. 브라우저가 보낸 사용자 ID·시각은 신뢰하지 않는다.
+### 서버 (배치 S 이후, 명세는 웹 배치 완료 후 작성)
 
-필드·오류 형식·길이 제한은 S02에서 고정한다. WebSocket을 유일한 전달 경로로 쓰지 않는다.
+| ID | 결정 |
+| --- | --- |
+| S1 | `node:http` + 직접 만든 작은 라우터. WebSocket은 `ws` 8.21.3. DB는 `node:sqlite`의 `DatabaseSync`(네이티브 빌드 없음), WAL, `foreign_keys=ON` |
+| S2 | 설정은 환경 변수: `NODE_ENV`, `HOST`, `PORT`, `DB_PATH`, `WEB_DIST`, `AUTH_MODE`(`dev`는 `NODE_ENV`가 production이 아닐 때만), `MAIL_SERVERS`(허용 메일 서버 JSON) |
+| S3 | API: `GET /health`, `POST /api/session`, `GET /api/me`, `POST /api/logout`, `GET/POST /api/conversations`, `GET /api/conversations/:id/messages?before=<id>&limit=50`(최대 100), `POST /api/conversations/:id/messages`, `GET /events`(WebSocket) |
+| S4 | 오류 형식 `{"error":{"code","message"}}`. code: bad_request 400, unauthorized 401, forbidden 403, not_found 404, conflict 409, too_large 413, internal 500. 로그인 실패는 계정 존재 여부를 드러내지 않는 401 하나 |
+| S5 | 스키마: users(id, server_id, username, display_name, UNIQUE(server_id, username)), sessions(token_hash PK, user_id, expires_at), conversations(id, server_id, title, created_at), members(conversation_id, user_id), messages(id INTEGER PK AUTOINCREMENT, conversation_id, sender_id, client_message_id, text, created_at, UNIQUE(sender_id, client_message_id)), INDEX messages(conversation_id, id) |
+| S6 | 세션: 32바이트 난수 base64url 토큰, 쿠키 `jm_session`(HttpOnly, SameSite=Strict, Path=/, 7일, production에서 Secure). DB에는 SHA-256만 저장 |
+| S7 | 메시지는 DB 저장 성공 후에만 WebSocket 이벤트 전송. 재접속 시 HTTP로 누락분 조회. 같은 보낸 사람의 같은 `clientMessageId`는 기존 메시지를 반환 |
+| S8 | 서버가 `WEB_DIST`의 웹 파일을 같은 출처로 제공. CORS 없음. 변경 요청과 WebSocket은 `Origin` 검사 |
+| S9 | 메일 인증은 IMAP over TLS(993) LOGIN 어댑터(`imapflow`, 버전은 A01에서 고정). P01에서 대상 제품이 IMAP을 제공하지 않으면 planner가 다시 결정 |
+| S10 | TLS: WSL에서 openssl로 사설 CA를 만들고 서버 인증서 SAN은 `IP:10.77.0.10`. CA는 사람이 Windows 사용자 인증서 저장소에 설치. HTTPS 포트 3443 |
 
-### 고정 구성과 데이터 소유
+## 단계와 배치
 
-- web은 브라우저 코드·정적 빌드 결과만 가진다. server는 API·인증·WebSocket·빌드된 웹 파일 제공을 맡는다. VM은 배포 코드와 SQLite 파일을 보관한다.
-- 운영 브라우저는 VM의 **같은 HTTPS 출처**에서 웹과 API에 접속한다. 개발 중 Vite는 WSL에서만 사용한다. 운영에서 Vite 개발 서버나 임의 CORS 허용을 사용하지 않는다.
-- SQLite에는 메일 서버의 내부 ID, 사용자 외부 식별자, 대화 참여 관계, 메시지 서버 ID·임시 ID·본문·생성 시각을 둔다. 비밀번호는 두지 않는다. 메시지 본문·토큰은 로그에 남기지 않는다.
-- DB 파일 경로, 포트, 메일 서버 접속 정보, TLS 키 경로는 VM 환경 설정에서 주입한다. 예시 파일에는 비밀값을 쓰지 않는다. 운영 프로세스는 전용 비관리 계정으로 실행한다.
-- 메시지 저장이 성공한 뒤에만 WebSocket 이벤트를 보낸다. 이벤트 누락은 HTTP 재조회로 복구한다. 서버 시각은 UTC로 저장한다.
-- 개발 계정은 명시적인 개발 모드에서만 활성화한다. 실제 메일 서버 인증을 붙이기 전, 관리자 허용 서버 목록과 사용자 식별자 규칙을 P01에서 확정한다.
+| 배치 | 내용 | 명세 | 상태 |
+| --- | --- | --- | --- |
+| E | VM 생성·설치·네트워크·계정·방화벽·연결 검증 | [vm-runbook.md](vm-runbook.md), [env.md](env.md) | 완료 (Claude, 2026-09-23) |
+| W | 웹 UI 데모: 뼈대 → lib → 데모 API → 화면 모듈 → 앱 결합 → 스타일 → README | [tasks/web.md](tasks/web.md) T1~T31 | `.ctx/TASKS.md`에 적재됨 |
+| S | 서버: /health → DB → 개발 인증 → 세션 → 대화 → 메시지 → WebSocket | 웹 배치 완료 후 작성 | 대기 |
+| D | VM 배포: 배포 스크립트, 서비스 enable, 재부팅 뒤 유지 | 배치 S 후 | 대기 |
+| I | 웹과 서버 연결: HTTP API 구현, 이벤트 수신·재접속 | 배치 D 후 | 대기 |
+| T | HTTPS/WSS, Secure 쿠키, Origin 검사 | 배치 I 후 | 대기 |
+| A | 메일 인증 어댑터, 서버 간 사용자 경계, 1차 판정 | P01 입력 후 | 대기 (메일 서버 정보 필요) |
 
-## WSL OpenCode 작업 규칙
+P01(사람 입력): 메일 서버 제품·버전, IMAP 호스트·포트, 시험 계정 2개, 다른 메일 서버 계정 1개. 비밀번호는 저장소에 적지 않는다.
 
-- **아래 카드 한 개씩** 실행한다. 한 카드가 끝나기 전 다음 카드를 합치지 않는다.
-- 매번 카드 ID, 허용 파일, 완료 조건만 넘긴다. 기존 파일을 먼저 읽고 범위 밖은 수정하지 않는다.
-- 변경 파일 목록·검증·미해결 사항을 보고하게 한다. 사람이 diff와 검증을 확인한 뒤 다음 카드로 간다.
-- 실패하면 해당 카드만 수정한다. 구조 변경이 필요하면 먼저 계약과 영향을 기록한다.
-- 새 패키지, 인증 우회, DB 교체, 네트워크 노출 확대는 카드에서 명시하지 않으면 진행하지 않는다.
+## executor 실행 방법
 
-프롬프트 틀:
-
-```text
-j-messenger/docs/plan.md의 <카드 ID>만 수행하라.
-허용 파일: <카드의 파일>.
-선행 카드의 결과를 읽고 완료 조건을 직접 검증하라.
-범위 밖 파일을 수정하지 말고 변경 파일·검증 결과·남은 문제를 보고하라.
+```bash
+cd /mnt/d/workspace/test-space/github/j-messenger
+opencode
 ```
 
-## 작은 작업 카드
+첫 메시지는 `다음 작업 진행`이면 된다. AGENTS.md가 ctx-relay를 불러오게 하고, 작업이 끝나면 다음 `- [ ]` 작업으로 계속 넘어간다. 멈추는 경우는 둘뿐이다: 모든 작업 완료, 또는 `status: blocked`.
 
-각 카드는 단독 검토가 가능한 변경이다. 완료 조건의 검증 결과는 카드 종료 때 남긴다.
+## planner 절차
 
-| ID | 선행 | 허용 파일 / 할 일 | 완료 조건·검증 |
-| --- | --- | --- | --- |
-| P01 | 없음 | docs/plan.md: 메일 제품·공식 문서·시험 계정 조건 기록 | 인증 수단·사용자 식별자 기록, 비밀값 제외 |
-| P02 | 없음 | docs/vm-runbook.md: IP/CIDR·게이트웨이·DNS·스위치명 기록 | LAN과 IP 중복 없음 확인 |
-| U01 | 없음 | web/package.json, web/index.html, web/src/main.ts: Vite/TS 시작 | 개발 서버가 제목 표시 |
-| U02 | U01 | web/src/styles.css: 화면 폭·색·타이포·포커스 | 360px·데스크톱에서 넘침 없음 |
-| U03 | U01 | web/src/demo-data.ts: 서버/대화/메시지 타입·표본 | 타입 검사, 같은 서버의 표본 |
-| U04 | U02,U03 | web/src/sidebar.ts: 대화 목록·선택 | 선택 표시, 키보드 조작 |
-| U05 | U03 | web/src/message-list.ts: 날짜·발신자·본문 | 본문을 HTML로 해석하지 않음 |
-| U06 | U04,U05 | web/src/main.ts: 목록·본문 결합 | 대화 전환 시 해당 메시지만 표시 |
-| U07 | U06 | web/src/composer.ts: 입력·빈값/길이 제한·데모 전송 | Enter/버튼 동작, 중복 제출 방지 |
-| U08 | U06 | web/src/login.ts: 서버 선택·계정 입력 | 비밀번호 감춤, 미입력 오류, 데모 표시 |
-| U09 | U08 | web/src/styles.css, web/src/main.ts: 좁은 화면 전환 | 360px에서 목록↔대화 이동 |
-| U10 | U09 | web/README.md: 실행·화면 확인 절차 | WSL에서 설치·실행 재현 |
-| V01 | P02 | scripts/New-MessengerVm.ps1: 입력·충돌·권한 검사 | 구문 검사, 기존 VM/스위치 보호 |
-| V02 | V01 | scripts/New-MessengerVm.ps1: Gen 2·1 vCPU·2 GiB 설치·20 GiB VHDX | Hyper-V 속성 조회 |
-| V03 | V02 | scripts/Configure-GuestNetwork.sh: 정적 IPv4 | 재부팅 뒤 주소 유지 |
-| V04 | V03 | docs/vm-runbook.md: 설치·1 GiB 전환·접속 결과 | WSL에서 고정 IP로 SSH·HTTP |
-| S01 | U10 | server/package.json, server/src/index.ts: /health | WSL에서 HTTP 200 |
-| S02 | S01 | docs/api.md: 요청/응답·오류·한도 계약 | 권한·예시·형식 확정 |
-| S03 | S02 | server/src/db.ts: SQLite 열기·WAL·마이그레이션 진입 | 빈 DB 생성·재실행 |
-| S04 | S03 | server/migrations/001_init.sql: 사용자·대화·참여자·메시지 | 외래키·고유키·인덱스 확인 |
-| S05 | S04 | server/src/auth/provider.ts: 인증 인터페이스 | 성공·실패·장애 결과 타입 검사 |
-| S05b | S05 | server/src/auth/dev.ts: 개발 구현 | 운영 모드에서 개발 구현 차단 |
-| S06 | S05b | server/src/session.ts: 세션 발급·조회 | 만료·HttpOnly·SameSite 확인 |
-| S06b | S06 | server/src/session.ts: 세션 폐기 | 로그아웃 뒤 재사용 거부 |
-| S07 | S06 | server/src/routes/session.ts: 로그인·내 정보·로그아웃 | 실패에 계정 존재 여부 노출 없음 |
-| S08 | S07 | server/src/conversations.ts: 본인 대화 조회 | 비참여자 대화 제외 |
-| S08b | S08 | server/src/conversations.ts: 대화 생성 | 다른 serverId 참여자 거부 |
-| S09 | S08 | server/src/messages.ts: 저장·중복키 | 같은 임시 ID 재시도에 행 1개 |
-| S10 | S09 | server/src/routes/messages.ts: 메시지 페이지 | 비참여자 차단, 순서·페이지 안정 |
-| S10b | S10 | server/src/routes/messages.ts: 전송 API | 비참여자 차단, 중복 응답 동일 |
-| S11 | S10b | server/src/events.ts: 본인 대화 WebSocket | 타 사용자 이벤트 없음 |
-| I01 | S07,U10 | web/src/api.ts: 세션 API 연결 | 로그인/로그아웃 반영, 데모와 분리 |
-| I02 | I01,S10 | web/src/api.ts, main.ts: 목록·메시지 연결 | 새로고침 뒤 기록 동일 |
-| I03 | I02,S11 | web/src/events.ts: 수신·재접속 조회 | 단절 중 메시지 복구 |
-| D01 | V04,S01 | docs/deploy.md: VM Node 설치 버전·전용 계정·디렉터리 | 공식 배포 경로와 버전 기록, 비관리 계정 확인 |
-| D02 | D01,S11 | server/src/static.ts: 빌드된 웹 파일 제공 | VM에서 웹·API가 같은 출처 |
-| D03 | D02 | deploy/j-messenger.service: 재시작·환경 파일·DB 경로 | VM 재부팅 뒤 서비스 기동·기록 유지 |
-| D04 | D03,T02 | docs/deploy.md: 허용 IP·게스트 방화벽 절차 | 허용 주소 접속, 그 외 주소 차단 |
-| I04 | I03,D04,T04b | docs/verification.md: VM의 두 브라우저 시험 | 송수신·새로고침·재시작 기록 |
-| T01 | V04 | docs/tls.md: 사설망 서버 이름·인증서 발급/신뢰 절차 | 두 브라우저·WSL에서 신뢰된 HTTPS 연결 |
-| T02 | T01,S07,D03 | server/src/security.ts: HTTPS/WSS 연결 | HTTP 자격 증명 거부 |
-| T03 | T02 | server/src/session.ts: 운영 Secure 쿠키 | HTTPS에서만 세션 유지 |
-| T04 | T03 | server/src/security.ts: HTTP 변경 요청 Origin/CSRF 검사 | 다른 Origin 변경 요청 거부 |
-| T04b | T04,S11 | server/src/events.ts: WebSocket Origin 검사 | 다른 Origin 연결 거부 |
-| A01 | P01,S05,T04b | server/src/auth/<제품>.ts: 공식 인증 어댑터 | 정상/오류/장애/시간 초과 검증 |
-| A02 | A01,S08 | 인증 어댑터, docs/verification.md: 사용자 경계 | 다른 메일 서버 계정·대화 차단 |
-| A03 | A02,I04,T04b | docs/verification.md, README.md: 1차 판정 | 실제 메일 계정 2개·HTTPS VM 경로 성공 |
+1. **배치 교체:** 모든 작업이 `[x]`이면 `.ctx/TASKS.md`에서 `[x]` 작업을 지우고 다음 배치 작업을 넣는다. ID는 계속 증가(T32부터). `python3 .ctx/ctx.py check`가 OK인지 확인한다.
+2. **막힘 해소:** STATE의 `blocked:`와 LOG 끝, `git diff`를 읽고 명세를 고치거나 작업을 쪼갠다. `[!]`를 `[ ]`로 되돌리고 STATE를 idle로 돌린다.
+3. **검토:** 배치가 끝나면 각 작업의 `verify:`를 다시 실행하고, 커밋마다 `files:` 밖 변경이 없는지 확인한다. 웹 배치 뒤에는 브라우저로 360px·데스크톱 화면을 직접 본다.
 
-<제품>은 P01에서 실제 이름으로 바꾼다. 카드 범위의 파일명은 첫 카드에서 조금 조정할 수 있지만 여러 기능을 한 카드에 묶지 않는다. 자동 검증은 권한·중복·복구처럼 실패 영향이 큰 부분에 집중한다.
-
-V01~V03의 스크립트 초안은 이 계획과 함께 제공한다. 카드 완료 표시는 현장 입력값을 넣어 실제 VM과 WSL 경로를 검증한 뒤에만 한다.
-
-## 후속 카드 묶음
+## 후속 기능 묶음
 
 1. 파일: 크기·형식·저장 위치 결정 → 업로드 권한 → 다운로드 권한 → 실패 정리 → UI.
 2. 읽음: 대화별 마지막 읽은 ID → API → 이벤트 → UI → 재접속 시험.
 3. 보존: 메일 서버 관리자 식별 → 설정 권한 → 만료 메시지 삭제 → 파일 삭제 → 중단 후 재시도.
-4. Windows·Android: 계약 재사용 결정 → 앱별 로그인·대화·파일 → 종료 상태 알림의 공식 플랫폼 제약 조사·실기기 시험.
+4. Windows·Android: 계약 재사용 결정 → 앱별 로그인·대화·파일 → 종료 상태 알림의 공식 플랫폼 제약 조사·실기기 시험. 폰은 VM(호스트 전용망)에 바로 닿지 않으므로 이 단계에서 공개 경로를 다시 결정한다.
 5. 성능·안정성: 고정 VM·데이터셋 확정 → 동시 접속/지연/메모리/디스크 측정 → 연결 끊김·재시작·중복·순서 시험 → 병목별 변경.
 
-각 묶음은 실행 전에 하나의 결과·소수 파일·명시적 검증을 가진 카드로 다시 쪼갠다. 외부 푸시 중계 없이 Android·Windows 종료 상태 알림을 충족할 수 없는 경우 구현 직전에 방식을 다시 결정한다. 웹 알림과 집 밖 사설 서버 접속은 범위 밖이다.
+외부 푸시 중계 없이 Android·Windows 종료 상태 알림을 충족할 수 없으면 구현 직전에 방식을 다시 결정한다. 웹 알림과 집 밖 사설 서버 접속은 범위 밖이다.
 
 ## 완료 기록
 
-카드마다 docs/verification.md에 ID, 환경, 실제 명령/화면, 기대값, 실제값, 실패 원인을 적는다. 자격 증명·메일 내용·개인정보는 기록하지 않는다. VM 부하 시험은 1 GiB 고정 상태와 동일 데이터·접속 조건에서 비교한다.
+배치·검증 결과는 `.ctx/LOG.md`(작업 단위)와 [verification.md](verification.md)(환경·통합 시험)에 남긴다. 자격 증명·메일 내용·개인정보는 기록하지 않는다.
