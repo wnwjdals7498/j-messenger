@@ -1,6 +1,6 @@
 # STATE
 goal: Phase 1 batch W: demo web UI, spec docs/tasks/web.md T1-T31
-updated: 2026-09-23 16:50
+updated: 2026-09-28 16:00
 
 ## now
 task: -

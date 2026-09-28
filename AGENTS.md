@@ -6,7 +6,7 @@ These rules apply to every request in this repository. They override the global 
 
 1. If the skill `ctx-relay` is in your available skills, load it with the skill tool **before anything else**, even for a short request. Then follow its Executor loop.
 2. If the skill is not available, follow the ctx-relay block at the end of this file. It is the same loop.
-3. Always run `python3 .ctx/ctx.py check`. Never `python`: in this WSL it is a Windows pyenv shim.
+3. Always run `python .ctx/ctx.py check`.
 4. This repository uses ctx-relay instead of the global `handoff` skill. Do not load `handoff` and do not create `.opencode/state/`. `.ctx/STATE.md` is the only state file.
 
 ## 2. Keep going, never ask
@@ -18,7 +18,7 @@ These rules apply to every request in this repository. They override the global 
 
 ## 3. Environment (fixed; details in docs/env.md)
 
-- Shell: bash in WSL Ubuntu 22.04, user `jjm`. Run every command from the repo root `/mnt/d/workspace/test-space/github/j-messenger`.
+- Run every command from the repo root `/mnt/d/workspace/test-space/github/j-messenger`.
 - Node 22 runs `.ts` files directly (type stripping). Do not add ts-node, tsx, Babel or build steps.
 - Ports: 5173 web dev server, 3000 server dev. **3001 is freellmapi, the model gateway you are running on: never bind, kill or call it.**
 - VM: `ssh jm-vm` (user `jmsg`, no sudo, 10.77.0.10). Use it only when a task's `do:` says so.
