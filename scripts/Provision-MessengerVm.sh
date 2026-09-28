@@ -95,6 +95,13 @@ done
 firewall-cmd --permanent --zone=jm-clients --add-service=ssh
 firewall-cmd --permanent --zone=jm-clients --add-port="$app_port/tcp"
 firewall-cmd --permanent --zone=public --remove-service=cockpit || true
+# Host forwarding is two-way: refuse new VM-initiated connections into the WSL NAT range.
+if ! firewall-cmd --permanent --get-policies | tr ' ' '\n' | grep -qx jm-no-wsl; then
+  firewall-cmd --permanent --new-policy=jm-no-wsl
+fi
+firewall-cmd --permanent --policy=jm-no-wsl --add-ingress-zone=HOST
+firewall-cmd --permanent --policy=jm-no-wsl --add-egress-zone=ANY
+firewall-cmd --permanent --policy=jm-no-wsl --add-rich-rule='rule family="ipv4" destination address="172.16.0.0/12" reject'
 firewall-cmd --reload
 
 echo "== network: static profile jm-internal ($vm_cidr) for next boot"

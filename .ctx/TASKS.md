@@ -1,128 +1,171 @@
 # TASKS
-plan: Batch W demo web UI. Spec: docs/tasks/web.md. Read only your task section and Common rules.
+plan: Batch WF (fix web, T32-T41, docs/tasks/web-fix.md) then batch S (server, T42-T73, docs/tasks/server.md). Verify: node scripts/verify.mjs <id>.
 
-- [x] T1 Scaffold the web project
-  files: web/package.json, web/tsconfig.json, web/vite.config.ts, web/index.html, web/src/main.ts, web/package-lock.json
-  do: Do section "## T1" of docs/tasks/web.md exactly (copy the file contents, then npm install).
-  verify: npm --prefix web install --no-audit --no-fund && npm --prefix web run build && test -f web/package-lock.json && test -f web/dist/index.html
-- [x] T2 Shared types
-  files: web/src/types.ts
-  do: Do section "## T2" of docs/tasks/web.md exactly (copy the file content).
-  verify: npm --prefix web run typecheck && grep -q 'export interface MessengerApi' web/src/types.ts && grep -q 'MESSAGE_MAX_LENGTH = 4000' web/src/types.ts
-- [x] T3 DOM test helper and smoke test
-  files: web/test/helpers/dom.ts, web/test/smoke.test.ts
-  do: Do section "## T3" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/smoke.test.ts
-- [x] T4 Test: format
-  files: web/test/format.test.ts
-  do: Do section "## T4" of docs/tasks/web.md. Do not create web/src/lib/format.ts.
-  verify: [ "$(grep -c "^test('" web/test/format.test.ts)" -ge 6 ] && node --test web/test/format.test.ts 2>&1 | grep -q 'Cannot find module .*web/src/lib/format.ts'
-- [x] T5 Impl: format
-  files: web/src/lib/format.ts
-  do: Do section "## T5" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/format.test.ts
-- [x] T6 Test: validate
-  files: web/test/validate.test.ts
-  do: Do section "## T6" of docs/tasks/web.md. Do not create web/src/lib/validate.ts.
-  verify: [ "$(grep -c "^test('" web/test/validate.test.ts)" -ge 6 ] && node --test web/test/validate.test.ts 2>&1 | grep -q 'Cannot find module .*web/src/lib/validate.ts'
-- [x] T7 Impl: validate
-  files: web/src/lib/validate.ts
-  do: Do section "## T7" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/validate.test.ts
-- [x] T8 Test: demo data
-  files: web/test/demo-data.test.ts
-  do: Do section "## T8" of docs/tasks/web.md. Do not create web/src/demo/demo-data.ts.
-  verify: [ "$(grep -c "^test('" web/test/demo-data.test.ts)" -ge 9 ] && node --test web/test/demo-data.test.ts 2>&1 | grep -q 'Cannot find module .*web/src/demo/demo-data.ts'
-- [x] T9 Impl: demo data
-  files: web/src/demo/demo-data.ts
-  do: Do section "## T9" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/demo-data.test.ts
-- [x] T10 Test: demo api
-  files: web/test/demo-api.test.ts
-  do: Do section "## T10" of docs/tasks/web.md. Do not create web/src/demo/demo-api.ts.
-  verify: [ "$(grep -c "^test('" web/test/demo-api.test.ts)" -ge 14 ] && node --test web/test/demo-api.test.ts 2>&1 | grep -q 'Cannot find module .*web/src/demo/demo-api.ts'
-- [x] T11 Impl: demo api
-  files: web/src/demo/demo-api.ts
-  do: Do section "## T11" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/demo-data.test.ts test/demo-api.test.ts
-- [x] T12 Test: dom helper
-  files: web/test/dom.test.ts
-  do: Do section "## T12" of docs/tasks/web.md. Do not create web/src/ui/dom.ts.
-  verify: [ "$(grep -c "^test('" web/test/dom.test.ts)" -ge 4 ] && node --test web/test/dom.test.ts 2>&1 | grep -q 'Cannot find module .*web/src/ui/dom.ts'
-- [x] T13 Impl: dom helper
-  files: web/src/ui/dom.ts
-  do: Do section "## T13" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/dom.test.ts
-- [x] T14 Test: sidebar
-  files: web/test/sidebar.test.ts
-  do: Do section "## T14" of docs/tasks/web.md. Do not create web/src/ui/sidebar.ts.
-  verify: [ "$(grep -c "^test('" web/test/sidebar.test.ts)" -ge 6 ] && node --test web/test/sidebar.test.ts 2>&1 | grep -q 'Cannot find module .*web/src/ui/sidebar.ts'
-- [x] T15 Impl: sidebar
-  files: web/src/ui/sidebar.ts
-  do: Do section "## T15" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/sidebar.test.ts
-- [x] T16 Test: message list
-  files: web/test/message-list.test.ts
-  do: Do section "## T16" of docs/tasks/web.md. Do not create web/src/ui/message-list.ts.
-  verify: [ "$(grep -c "^test('" web/test/message-list.test.ts)" -ge 8 ] && node --test web/test/message-list.test.ts 2>&1 | grep -q 'Cannot find module .*web/src/ui/message-list.ts'
-- [x] T17 Impl: message list
-  files: web/src/ui/message-list.ts
-  do: Do section "## T17" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/message-list.test.ts
-- [x] T18 Test: composer
-  files: web/test/composer.test.ts
-  do: Do section "## T18" of docs/tasks/web.md. Do not create web/src/ui/composer.ts.
-  verify: [ "$(grep -c "^test('" web/test/composer.test.ts)" -ge 10 ] && node --test web/test/composer.test.ts 2>&1 | grep -q 'Cannot find module .*web/src/ui/composer.ts'
-- [x] T19 Impl: composer
-  files: web/src/ui/composer.ts
-  do: Do section "## T19" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/composer.test.ts
-- [x] T20 Test: login
-  files: web/test/login.test.ts
-  do: Do section "## T20" of docs/tasks/web.md. Do not create web/src/ui/login.ts.
-  verify: [ "$(grep -c "^test('" web/test/login.test.ts)" -ge 7 ] && node --test web/test/login.test.ts 2>&1 | grep -q 'Cannot find module .*web/src/ui/login.ts'
-- [x] T21 Impl: login
-  files: web/src/ui/login.ts
-  do: Do section "## T21" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/login.test.ts
-- [x] T22 Test: app login and layout
-  files: web/test/helpers/app.ts, web/test/app-login.test.ts
-  do: Do section "## T22" of docs/tasks/web.md. Do not create web/src/app.ts.
-  verify: [ "$(grep -c "^test('" web/test/app-login.test.ts)" -ge 4 ] && node --test web/test/app-login.test.ts 2>&1 | grep -q 'Cannot find module .*web/src/app.ts'
-- [x] T23 Impl: app login and layout
-  files: web/src/app.ts
-  do: Do section "## T23" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/app-login.test.ts
-- [x] T24 Test: app conversation selection
-  files: web/test/app-select.test.ts
-  do: Do section "## T24" of docs/tasks/web.md. Some of these tests fail until T25; that is expected.
-  verify: [ "$(grep -c "^test('" web/test/app-select.test.ts)" -ge 5 ] && node --test --test-reporter=tap web/test/app-select.test.ts 2>&1 | grep -qE '^# tests ([5-9]|[1-9][0-9])$'
-- [x] T25 Impl: app conversation selection
-  files: web/src/app.ts
-  do: Do section "## T25" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/app-login.test.ts test/app-select.test.ts
-- [x] T26 Test: app sending and logout
-  files: web/test/app-send.test.ts
-  do: Do section "## T26" of docs/tasks/web.md. Some of these tests fail until T27; that is expected.
-  verify: [ "$(grep -c "^test('" web/test/app-send.test.ts)" -ge 5 ] && node --test --test-reporter=tap web/test/app-send.test.ts 2>&1 | grep -qE '^# tests ([5-9]|[1-9][0-9])$'
-- [x] T27 Impl: app sending and logout
-  files: web/src/app.ts
-  do: Do section "## T27" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/app-login.test.ts test/app-select.test.ts test/app-send.test.ts
-- [x] T28 Test: styles
+- [ ] T32 Remove the stray debug test
+  files: web/test/composer-test-debug.ts
+  do: Do section "## T32" of docs/tasks/web-fix.md.
+  verify: node scripts/verify.mjs T32
+- [ ] T33 Test: restore the styles test
   files: web/test/styles.test.ts
-  do: Do section "## T28" of docs/tasks/web.md. Do not create web/src/styles.css.
-  verify: [ "$(grep -c "^test('" web/test/styles.test.ts)" -ge 6 ] && node --test web/test/styles.test.ts 2>&1 | grep -q 'ENOENT.*web/src/styles.css'
-- [x] T29 Impl: styles
+  do: Do section "## T33" of docs/tasks/web-fix.md. One test must fail until T34.
+  verify: node scripts/verify.mjs T33
+- [ ] T34 Impl: fix the narrow-screen selectors
   files: web/src/styles.css
-  do: Do section "## T29" of docs/tasks/web.md.
-  verify: npm --prefix web run check -- test/styles.test.ts && npm --prefix web run build
-- [x] T30 Wire the app entry point
-  files: web/src/main.ts
-  do: Do section "## T30" of docs/tasks/web.md exactly (copy the file content).
-  verify: npm --prefix web run build && grep -q 'createDemoApi()' web/src/main.ts && ! grep -q 'Placeholder' web/src/main.ts
-- [x] T31 Web README and full check
+  do: Do section "## T34" of docs/tasks/web-fix.md.
+  verify: node scripts/verify.mjs T34
+- [ ] T35 Test: restore the composer test
+  files: web/test/composer.test.ts
+  do: Do section "## T35" of docs/tasks/web-fix.md. One test must fail until T36.
+  verify: node scripts/verify.mjs T35
+- [ ] T36 Impl: composer form skips browser validation
+  files: web/src/ui/composer.ts
+  do: Do section "## T36" of docs/tasks/web-fix.md.
+  verify: node scripts/verify.mjs T36
+- [ ] T37 Test: restore sidebar and dom assertions
+  files: web/test/sidebar.test.ts, web/test/dom.test.ts
+  do: Do section "## T37" of docs/tasks/web-fix.md.
+  verify: node scripts/verify.mjs T37
+- [ ] T38 Test: restore login assertions
+  files: web/test/login.test.ts
+  do: Do section "## T38" of docs/tasks/web-fix.md.
+  verify: node scripts/verify.mjs T38
+- [ ] T39 Test: restore the app helpers and app tests
+  files: web/test/helpers/app.ts, web/test/app-login.test.ts, web/test/app-send.test.ts, web/test/app-select.test.ts
+  do: Do section "## T39" of docs/tasks/web-fix.md. One app-select test must fail until T40.
+  verify: node scripts/verify.mjs T39
+- [ ] T40 Impl: app.ts back to the spec
+  files: web/src/app.ts
+  do: Do section "## T40" of docs/tasks/web-fix.md.
+  verify: node scripts/verify.mjs T40
+- [ ] T41 Web README for Windows
   files: web/README.md
-  do: Do section "## T31" of docs/tasks/web.md.
-  verify: grep -q 'npm --prefix web run dev' web/README.md && grep -q 'http://localhost:5173' web/README.md && grep -q 'alice' web/README.md && npm --prefix web test && npm --prefix web run build
-
+  do: Do section "## T41" of docs/tasks/web-fix.md. Use the file edit tool, not PowerShell.
+  verify: node scripts/verify.mjs T41
+- [ ] T42 Scaffold the server package
+  files: server/package.json, server/tsconfig.json, server/src/version.ts, server/package-lock.json
+  do: Do section "## T42" of docs/tasks/server.md (copy the files, then npm install).
+  verify: node scripts/verify.mjs T42
+- [ ] T43 Test: config
+  files: server/test/config.test.ts
+  do: Do section "## T43" of docs/tasks/server.md. Do not create server/src/config.ts.
+  verify: node scripts/verify.mjs T43
+- [ ] T44 Impl: config
+  files: server/src/config.ts
+  do: Do section "## T44" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T44
+- [ ] T45 Database migrations
+  files: server/src/migrations.ts
+  do: Do section "## T45" of docs/tasks/server.md (copy the file content).
+  verify: node scripts/verify.mjs T45
+- [ ] T46 Test: db
+  files: server/test/db.test.ts
+  do: Do section "## T46" of docs/tasks/server.md. Do not create server/src/db.ts.
+  verify: node scripts/verify.mjs T46
+- [ ] T47 Impl: db
+  files: server/src/db.ts
+  do: Do section "## T47" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T47
+- [ ] T48 Test: http-util
+  files: server/test/http-util.test.ts
+  do: Do section "## T48" of docs/tasks/server.md. Do not create server/src/http-util.ts.
+  verify: node scripts/verify.mjs T48
+- [ ] T49 Impl: http-util
+  files: server/src/http-util.ts
+  do: Do section "## T49" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T49
+- [ ] T50 Test: router
+  files: server/test/router.test.ts
+  do: Do section "## T50" of docs/tasks/server.md. Do not create server/src/router.ts.
+  verify: node scripts/verify.mjs T50
+- [ ] T51 Impl: router
+  files: server/src/router.ts
+  do: Do section "## T51" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T51
+- [ ] T52 Auth provider contract
+  files: server/src/auth/provider.ts
+  do: Do section "## T52" of docs/tasks/server.md (copy the file content).
+  verify: node scripts/verify.mjs T52
+- [ ] T53 Test: dev auth
+  files: server/test/dev-auth.test.ts
+  do: Do section "## T53" of docs/tasks/server.md. Do not create server/src/auth/dev.ts.
+  verify: node scripts/verify.mjs T53
+- [ ] T54 Impl: dev auth
+  files: server/src/auth/dev.ts
+  do: Do section "## T54" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T54
+- [ ] T55 Test: users
+  files: server/test/users.test.ts
+  do: Do section "## T55" of docs/tasks/server.md. Do not create server/src/users.ts.
+  verify: node scripts/verify.mjs T55
+- [ ] T56 Impl: users
+  files: server/src/users.ts
+  do: Do section "## T56" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T56
+- [ ] T57 Test: sessions
+  files: server/test/sessions.test.ts
+  do: Do section "## T57" of docs/tasks/server.md. Do not create server/src/sessions.ts.
+  verify: node scripts/verify.mjs T57
+- [ ] T58 Impl: sessions
+  files: server/src/sessions.ts
+  do: Do section "## T58" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T58
+- [ ] T59 Test: conversations
+  files: server/test/conversations.test.ts
+  do: Do section "## T59" of docs/tasks/server.md. Do not create server/src/conversations.ts.
+  verify: node scripts/verify.mjs T59
+- [ ] T60 Impl: conversations
+  files: server/src/conversations.ts
+  do: Do section "## T60" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T60
+- [ ] T61 Test: messages
+  files: server/test/messages.test.ts
+  do: Do section "## T61" of docs/tasks/server.md. Do not create server/src/messages.ts.
+  verify: node scripts/verify.mjs T61
+- [ ] T62 Impl: messages
+  files: server/src/messages.ts
+  do: Do section "## T62" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T62
+- [ ] T63 Test: events
+  files: server/test/events.test.ts
+  do: Do section "## T63" of docs/tasks/server.md. Do not create server/src/events.ts.
+  verify: node scripts/verify.mjs T63
+- [ ] T64 Impl: events
+  files: server/src/events.ts
+  do: Do section "## T64" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T64
+- [ ] T65 Test: app core
+  files: server/test/helpers/server.ts, server/test/app-core.test.ts
+  do: Do section "## T65" of docs/tasks/server.md. Do not create server/src/app.ts.
+  verify: node scripts/verify.mjs T65
+- [ ] T66 Impl: app core
+  files: server/src/app.ts
+  do: Do section "## T66" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T66
+- [ ] T67 Test: app data routes
+  files: server/test/app-data.test.ts
+  do: Do section "## T67" of docs/tasks/server.md. Tests fail until T68; that is expected.
+  verify: node scripts/verify.mjs T67
+- [ ] T68 Impl: app data routes
+  files: server/src/app.ts
+  do: Do section "## T68" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T68
+- [ ] T69 Test: app events
+  files: server/test/app-events.test.ts
+  do: Do section "## T69" of docs/tasks/server.md. Tests fail until T70; that is expected.
+  verify: node scripts/verify.mjs T69
+- [ ] T70 Impl: app events
+  files: server/src/app.ts
+  do: Do section "## T70" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T70
+- [ ] T71 Test: server entry point
+  files: server/test/index.test.ts
+  do: Do section "## T71" of docs/tasks/server.md. Do not create server/src/index.ts.
+  verify: node scripts/verify.mjs T71
+- [ ] T72 Impl: server entry point
+  files: server/src/index.ts
+  do: Do section "## T72" of docs/tasks/server.md.
+  verify: node scripts/verify.mjs T72
+- [ ] T73 Server README and full check
+  files: server/README.md
+  do: Do section "## T73" of docs/tasks/server.md. Use the file edit tool, not PowerShell.
+  verify: node scripts/verify.mjs T73

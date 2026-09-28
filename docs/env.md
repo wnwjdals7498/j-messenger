@@ -31,7 +31,21 @@ Windows 11 호스트 (192.168.0.66, 회사 LAN · 인터넷)
 | 브라우저 → WSL 개발 서버 | `http://localhost:5173` (WSL localhost 전달, 실측 성공) |
 | 브라우저 → VM | `http://10.77.0.10:3000` (호스트 10.77.0.1은 VM 방화벽 허용 대역) |
 
-## WSL (개발·OpenCode 실행)
+## executor (Windows, 2026-09-29부터)
+
+| 항목 | 값 |
+| --- | --- |
+| 작업 폴더 | `D:\workspace\test-space\github\j-messenger` (이 저장소 자체. 별도 clone 없음) |
+| 셸 | PowerShell. 파일은 에이전트 편집 도구로만 쓴다 |
+| Node / npm | v24.16.0 / 11.13.0 (nvm4w). `web/node_modules`는 win32 바이너리 |
+| Python | `python` (pyenv-win) → `python .ctx/ctx.py check` |
+| 에이전트 | Codex CLI 등. 스킬은 `.agents/skills/ctx-relay` → `D:\workspace\test-space\github\j-skills\ctx-relay` junction (git 제외) |
+| 검증 | `node scripts/verify.mjs T<n>` |
+| VM 접속 | 이 배치에서는 없음. 배포 배치(D)에서 Windows용 SSH 키·설정을 planner가 준비 |
+
+WSL clone `~/projects/j-messenger`(T1~T5 커밋, 이후 미커밋)은 더 이상 쓰지 않는다.
+
+## WSL (VM 관리용, 이전 executor)
 
 | 항목 | 값 |
 | --- | --- |
@@ -91,6 +105,9 @@ SSH는 `/etc/ssh/sshd_config.d/10-j-messenger.conf`로 비밀번호 로그인과
 | --- | --- | --- |
 | `jm-clients` | 10.77.0.0/24(호스트), 172.16.0.0/12(WSL NAT 대역) | ssh, 3000/tcp |
 | `public` | 그 외 | ssh (cockpit 제거) |
+| 정책 `jm-no-wsl` (HOST → ANY) | VM이 시작하는 연결 | 172.16.0.0/12(WSL)로 가는 새 연결 거부. WSL → VM 연결의 응답은 영향 없음 |
+
+`jm-no-wsl`은 2026-09-29에 추가했다. 호스트 forwarding은 양방향이라, VM에서 WSL의 `opencode serve --hostname 0.0.0.0 --port 4096`(권한 전부 허용)에 HTTP 200으로 닿았다. Hyper-V 방화벽 규칙(`New-NetFirewallHyperVRule`)은 라우팅되는 트래픽을 막지 못해 제거했다. 추가 권장: WSL에서 OpenCode를 쓴다면 `opencode serve --hostname 127.0.0.1`.
 
 ## WSL SSH 설정 (`~/.ssh/config`)
 

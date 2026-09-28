@@ -11,7 +11,7 @@ Rocky Linux 10 VM의 Node 서버와 웹 UI를 먼저 만든다. 메일 서버 �
 | 누구 | 하는 일 |
 | --- | --- |
 | Claude (planner) | 결정, 작업 명세(`docs/tasks/*.md`), `.ctx/TASKS.md` 배치 교체, 막힘 해소, 배치 검토, VM·호스트 인프라(sudo 필요한 모든 일) |
-| OpenCode + 작은 모델 (executor) | `.ctx/TASKS.md`의 작업을 위에서부터 하나씩 구현·검증·커밋. 질문하지 않고, 불명확하면 blocked로 멈춤 |
+| executor (Windows `D:\`의 코딩 에이전트: Codex CLI 등) | `.ctx/TASKS.md`의 작업을 위에서부터 하나씩 구현·`node scripts/verify.mjs`로 검증·커밋. 질문하지 않고, 불명확하면 blocked로 멈춤 |
 | 사람 | VM 콘솔 비밀번호 입력, 메일 서버 정보 제공(P01), 인증서 신뢰 설치, 최종 확인 |
 
 작업 흐름과 규칙은 [AGENTS.md](../AGENTS.md)와 ctx-relay 스킬이 정한다. 환경 값은 [env.md](env.md)가 정본이다.
@@ -31,12 +31,16 @@ Rocky Linux 10 VM의 Node 서버와 웹 UI를 먼저 만든다. 메일 서버 �
 | E5 | 서버는 `jmsg`의 systemd **사용자** 서비스 `j-messenger`(linger). 재시작은 sudo 없이 `systemctl --user` | 배포 작업에서 sudo 제거 |
 | E6 | 배포는 WSL에서 `tar`를 SSH로 보내고 VM에서 `npm ci --omit=dev` | rsync 불필요, VM은 NAT로 npm 접근 가능 |
 | E7 | VM 방화벽: 10.77.0.0/24, 172.16.0.0/12만 ssh·3000 허용. HTTPS는 3443 | 호스트·WSL 외 접근 차단. 사용자 서비스는 1024 미만 포트 불가 |
+| E8 | VM → 172.16.0.0/12(WSL) 새 연결 거부(firewalld 정책 `jm-no-wsl`) | forwarding은 양방향이라 VM에서 WSL의 `opencode serve`(0.0.0.0:4096)에 닿았음. 2026-09-29 실측 후 차단 |
+| E9 | executor는 Windows `D:\workspace\test-space\github\j-messenger`에서 실행(PowerShell, Node 24.16). WSL clone `~/projects/j-messenger`은 쓰지 않음 | 사용자 결정(2026-09-29). 웹 배치가 이 환경에서 실행됨 |
+| E10 | 모든 작업의 검증은 `node scripts/verify.mjs T<n>`. 작업 `files:`와 `.ctx/` 밖 변경이 있으면 실패 → 작업별 커밋과 테스트 불변을 강제 | 웹 배치에서 커밋 누락, 구현 후 테스트 약화, 범위 밖 파일(AGENTS.md, 디버그 파일) 변경이 발생 |
+| E11 | 파일은 에이전트의 편집 도구로만 쓴다. PowerShell 문자열로 쓰지 않는다 | 백틱 이스케이프로 README·CSS가 깨졌음 |
 
 ### 공통 코드 규칙
 
 | ID | 결정 |
 | --- | --- |
-| C1 | Node 22 (WSL 22.22.2, VM 22.23.2). TypeScript는 Node 타입 제거로 직접 실행. ts-node·tsx·Babel·빌드 산출물 없음(웹은 Vite 빌드) |
+| C1 | 개발·테스트 Node 24.16(Windows), 운영 Node 22.23(VM). Node 22에 있는 기능만 쓴다. TypeScript는 Node 타입 제거로 직접 실행. ts-node·tsx·Babel·빌드 산출물 없음(웹은 Vite 빌드) |
 | C2 | TypeScript 5.9.3 strict. 로컬 import는 `.ts` 확장자 포함. enum·namespace·생성자 매개변수 속성·데코레이터 금지(`erasableSyntaxOnly`). 타입 import는 `import type` |
 | C3 | 테스트는 `node:test` + `node:assert/strict`. 테스트 파일은 별도 선행 작업에서 만들고, 구현 작업은 테스트 파일을 수정하지 못한다 |
 | C4 | 새 의존성 금지. 허용 패키지는 명세에 버전까지 적힌 것뿐: vite 7.3.6, typescript 5.9.3, happy-dom 20.14.5, (서버) ws 8.21.3 |
@@ -55,14 +59,14 @@ Rocky Linux 10 VM의 Node 서버와 웹 UI를 먼저 만든다. 메일 서버 �
 | W6 | 레이아웃: 데스크톱은 목록 280px + 대화. 640px 이하는 한 화면씩(`data-pane="list"|"chat"`) |
 | W7 | 데모 데이터는 명세에 고정된 표본(서버 2, 사용자 5, 대화 3, 메시지 7). 데모 로그인은 표본 아이디 + 비어 있지 않은 아무 비밀번호 |
 
-### 서버 (배치 S 이후, 명세는 웹 배치 완료 후 작성)
+### 서버 (배치 S, 명세 [tasks/server.md](tasks/server.md))
 
 | ID | 결정 |
 | --- | --- |
-| S1 | `node:http` + 직접 만든 작은 라우터. WebSocket은 `ws` 8.21.3. DB는 `node:sqlite`의 `DatabaseSync`(네이티브 빌드 없음), WAL, `foreign_keys=ON` |
-| S2 | 설정은 환경 변수: `NODE_ENV`, `HOST`, `PORT`, `DB_PATH`, `WEB_DIST`, `AUTH_MODE`(`dev`는 `NODE_ENV`가 production이 아닐 때만), `MAIL_SERVERS`(허용 메일 서버 JSON) |
-| S3 | API: `GET /health`, `POST /api/session`, `GET /api/me`, `POST /api/logout`, `GET/POST /api/conversations`, `GET /api/conversations/:id/messages?before=<id>&limit=50`(최대 100), `POST /api/conversations/:id/messages`, `GET /events`(WebSocket) |
-| S4 | 오류 형식 `{"error":{"code","message"}}`. code: bad_request 400, unauthorized 401, forbidden 403, not_found 404, conflict 409, too_large 413, internal 500. 로그인 실패는 계정 존재 여부를 드러내지 않는 401 하나 |
+| S1 | `node:http` + 직접 만든 작은 라우터. WebSocket은 `ws` 8.21.3. DB는 `node:sqlite`의 `DatabaseSync`(네이티브 빌드 없음), WAL, `foreign_keys=ON`. 타입 검사용 `@types/node` 22.20.4, `@types/ws` 8.18.1 |
+| S2 | 설정은 환경 변수: `NODE_ENV`, `HOST`, `PORT`, `DB_PATH`, `WEB_DIST`, `AUTH_MODE`(`dev`는 production 금지), `MAIL_SERVERS`(허용 메일 서버 JSON), `SESSION_DAYS`(7), `COOKIE_SECURE`(TLS 전까지 false). 메일 인증 전까지 VM도 `NODE_ENV=development` + 개발 계정으로 운영 |
+| S3 | API(응답은 항상 객체로 감쌈): `GET /health`, `GET /api/servers`, `POST /api/session`, `GET /api/me`, `POST /api/logout`, `GET /api/users`, `GET/POST /api/conversations`, `GET /api/conversations/:id/messages?before=<id>&limit=50`(최대 100), `POST /api/conversations/:id/messages`(새 메시지 201, 중복 200), `GET /events`(WebSocket) |
+| S4 | 오류 형식 `{"error":{"code","message"}}`. code: bad_request 400, unauthorized 401, forbidden 403, not_found 404, method_not_allowed 405, conflict 409, too_large 413, internal 500, unavailable 503. 로그인 실패는 계정 존재 여부를 드러내지 않는 401 하나. 대화 비참여자에게는 404 |
 | S5 | 스키마: users(id, server_id, username, display_name, UNIQUE(server_id, username)), sessions(token_hash PK, user_id, expires_at), conversations(id, server_id, title, created_at), members(conversation_id, user_id), messages(id INTEGER PK AUTOINCREMENT, conversation_id, sender_id, client_message_id, text, created_at, UNIQUE(sender_id, client_message_id)), INDEX messages(conversation_id, id) |
 | S6 | 세션: 32바이트 난수 base64url 토큰, 쿠키 `jm_session`(HttpOnly, SameSite=Strict, Path=/, 7일, production에서 Secure). DB에는 SHA-256만 저장 |
 | S7 | 메시지는 DB 저장 성공 후에만 WebSocket 이벤트 전송. 재접속 시 HTTP로 누락분 조회. 같은 보낸 사람의 같은 `clientMessageId`는 기존 메시지를 반환 |
@@ -75,8 +79,9 @@ Rocky Linux 10 VM의 Node 서버와 웹 UI를 먼저 만든다. 메일 서버 �
 | 배치 | 내용 | 명세 | 상태 |
 | --- | --- | --- | --- |
 | E | VM 생성·설치·네트워크·계정·방화벽·연결 검증 | [vm-runbook.md](vm-runbook.md), [env.md](env.md) | 완료 (Claude, 2026-09-23) |
-| W | 웹 UI 데모: 뼈대 → lib → 데모 API → 화면 모듈 → 앱 결합 → 스타일 → README | [tasks/web.md](tasks/web.md) T1~T31 | `.ctx/TASKS.md`에 적재됨 |
-| S | 서버: /health → DB → 개발 인증 → 세션 → 대화 → 메시지 → WebSocket | 웹 배치 완료 후 작성 | 대기 |
+| W | 웹 UI 데모: 뼈대 → lib → 데모 API → 화면 모듈 → 앱 결합 → 스타일 → README | [tasks/web.md](tasks/web.md) T1~T31 | 실행됨(2026-09-28, 커밋 누락·테스트 약화·모바일 CSS 버그). 기준선 커밋 `16d97cb` |
+| WF | 웹 결함 수정: 테스트를 명세대로 복구 → CSS·composer·app.ts 수정 → README | [tasks/web-fix.md](tasks/web-fix.md) T32~T41 | `.ctx/TASKS.md`에 적재됨 |
+| S | 서버: 설정 → DB → http 도구 → 라우터 → 개발 인증 → 사용자·세션 → 대화 → 메시지 → 이벤트 → 앱 라우트 → WebSocket → 진입점 | [tasks/server.md](tasks/server.md) T42~T73 | `.ctx/TASKS.md`에 적재됨 |
 | D | VM 배포: 배포 스크립트, 서비스 enable, 재부팅 뒤 유지 | 배치 S 후 | 대기 |
 | I | 웹과 서버 연결: HTTP API 구현, 이벤트 수신·재접속 | 배치 D 후 | 대기 |
 | T | HTTPS/WSS, Secure 쿠키, Origin 검사 | 배치 I 후 | 대기 |
@@ -86,16 +91,13 @@ P01(사람 입력): 메일 서버 제품·버전, IMAP 호스트·포트, 시험
 
 ## executor 실행 방법
 
-```bash
-cd /mnt/d/workspace/test-space/github/j-messenger
-opencode
-```
-
-첫 메시지는 `다음 작업 진행`이면 된다. AGENTS.md가 ctx-relay를 불러오게 하고, 작업이 끝나면 다음 `- [ ]` 작업으로 계속 넘어간다. 멈추는 경우는 둘뿐이다: 모든 작업 완료, 또는 `status: blocked`.
+Windows에서 저장소 루트(`D:\workspace\test-space\github\j-messenger`)를 작업 폴더로 코딩 에이전트를 실행하고 `다음 작업 진행`을 입력한다.
+Codex는 `.agents/skills/ctx-relay`(j-skills로 연결한 junction, git 제외)에서 스킬을 찾는다.
+AGENTS.md가 ctx-relay를 불러오게 하고, 작업이 끝나면 다음 `- [ ]` 작업으로 계속 넘어간다. 멈추는 경우는 둘뿐이다: 모든 작업 완료, 또는 `status: blocked`.
 
 ## planner 절차
 
-1. **배치 교체:** 모든 작업이 `[x]`이면 `.ctx/TASKS.md`에서 `[x]` 작업을 지우고 다음 배치 작업을 넣는다. ID는 계속 증가(T32부터). `python3 .ctx/ctx.py check`가 OK인지 확인한다.
+1. **배치 교체:** 모든 작업이 `[x]`이면 `.ctx/TASKS.md`에서 `[x]` 작업을 지우고 다음 배치 작업을 넣는다. ID는 계속 증가한다. `scripts/verify.mjs`에 새 작업의 검사를 추가하고 `python .ctx/ctx.py check`가 OK인지 확인한 뒤 커밋한다.
 2. **막힘 해소:** STATE의 `blocked:`와 LOG 끝, `git diff`를 읽고 명세를 고치거나 작업을 쪼갠다. `[!]`를 `[ ]`로 되돌리고 STATE를 idle로 돌린다.
 3. **검토:** 배치가 끝나면 각 작업의 `verify:`를 다시 실행하고, 커밋마다 `files:` 밖 변경이 없는지 확인한다. 웹 배치 뒤에는 브라우저로 360px·데스크톱 화면을 직접 본다.
 
