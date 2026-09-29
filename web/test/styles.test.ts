@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+﻿import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
@@ -53,8 +53,8 @@ test('message text keeps line breaks', () => {
 
 test('narrow screens show one pane at a time', () => {
   const m = block('@media (max-width: 640px)');
-  assert.ok(m.includes('[data-pane=\"list\"] .chat'));
-  assert.ok(m.includes('[data-pane=\"chat\"] .sidebar'));
+  assert.ok(m.includes('[data-pane="list"] .chat'));
+  assert.ok(m.includes('[data-pane="chat"] .sidebar'));
   assert.ok(m.includes('display: none'));
 });
 

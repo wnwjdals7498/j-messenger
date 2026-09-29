@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --color-bg: #f5f6f8;
   --color-surface: #ffffff;
   --color-text: #1d2026;
@@ -6,7 +6,7 @@
   --color-accent: #2563eb;
   --color-mine: #dbeafe;
   --color-border: #d9dce1;
-  font-family: system-ui, 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  font-family: system-ui, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
   font-size: 16px;
 }
 
@@ -212,10 +212,10 @@ button:disabled {
   .back {
     display: inline-block;
   }
-  [data-pane=\"list\"] .chat {
+  [data-pane="list"] .chat {
     display: none;
   }
-  [data-pane=\"chat\"] .sidebar {
+  [data-pane="chat"] .sidebar {
     display: none;
   }
   .message {
