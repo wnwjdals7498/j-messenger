@@ -1,9 +1,6 @@
-import { test } from 'node:test';
+﻿import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDom, tick, settle, keydown } from './helpers/dom.ts';
-
-// This import will fail because we do not create src/ui/sidebar.ts yet.
-// That's expected for this test task.
 import { renderSidebar } from '../src/ui/sidebar.ts';
 
 const convs = [
@@ -26,9 +23,9 @@ test('renders one button per conversation inside a list', () => {
 test('marks only the selected conversation', () => {
   const { window, document, root } = createDom();
   renderSidebar(root, convs, 'c2', () => {});
-  const b1 = root.querySelector('[data-id=\"c1\"]');
-  const b2 = root.querySelector('[data-id=\"c2\"]');
-  const b3 = root.querySelector('[data-id=\"c3\"]');
+  const b1 = root.querySelector('[data-id="c1"]');
+  const b2 = root.querySelector('[data-id="c2"]');
+  const b3 = root.querySelector('[data-id="c3"]');
   assert.strictEqual(b1?.getAttribute('aria-current'), null);
   assert.ok(!b1?.classList.contains('is-selected'));
   assert.strictEqual(b2?.getAttribute('aria-current'), 'true');
@@ -39,11 +36,10 @@ test('marks only the selected conversation', () => {
 
 test('clicking a conversation calls onSelect with its id', () => {
   const { window, document, root } = createDom();
-  let calledWith = '';
-  renderSidebar(root, convs, null, (id) => { calledWith = id; });
-  const b3 = root.querySelector('[data-id=\"c3\"]')!;
-  b3.click();
-  assert.strictEqual(calledWith, 'c3');
+  const selected: string[] = [];
+  renderSidebar(root, convs, null, (id) => selected.push(id));
+  (root.querySelector('button[data-id="c3"]') as HTMLButtonElement).click();
+  assert.deepEqual(selected, ['c3']);
 });
 
 test('rendering again replaces the previous list', () => {
