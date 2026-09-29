@@ -1,12 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const css = readFileSync(resolve(__dirname, '../src/styles.css'), 'utf8');
+const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 function block(start: string): string {
   const idx = css.indexOf(start);
@@ -53,18 +48,14 @@ test('styles every UI part', () => {
 });
 
 test('message text keeps line breaks', () => {
-  // Just check that the text rule has white-space property
-  assert.ok(css.includes('white-space: pre-wrap'));
+  assert.ok(/\.text\s*\{[^}]*white-space:\s*pre-wrap/.test(css));
 });
 
 test('narrow screens show one pane at a time', () => {
   const m = block('@media (max-width: 640px)');
-  const hasList = m.includes('display: none') && m.includes('data-pane');
-  const hasChat = m.includes('display: none') && (m.includes('data-pane') || m.includes('data-pane'));
-  const hasDark = m.includes('display: none');
-  assert.ok(hasList, 'Missing list media query');
-  assert.ok(hasChat, 'Missing chat media query');
-  assert.ok(hasDark, 'Missing dark mode media query');
+  assert.ok(m.includes('[data-pane=\"list\"] .chat'));
+  assert.ok(m.includes('[data-pane=\"chat\"] .sidebar'));
+  assert.ok(m.includes('display: none'));
 });
 
 test('supports dark mode', () => {
