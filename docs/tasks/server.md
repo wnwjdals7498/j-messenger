@@ -31,6 +31,9 @@ the section names. Everything is decided. Do not ask questions. If something is 
   or `test('name', async () => {...});`. No `describe`, no nesting. Write exactly the listed tests.
 - To check a thrown `HttpError`: `assert.throws(() => fn(), (e) => e instanceof HttpError && e.status === 400);`
   (async: `await assert.rejects(promise, (e) => ...)`).
+- To check a thrown `Error` message, always pass an object: `assert.throws(() => fn(), { message: /^config: PORT/ });`.
+  Never pass the regex directly (`assert.throws(fn, /^config/)` matches `String(err)`, which starts with `Error: `, so `^` never matches).
+- `node:sqlite` rows have a null prototype: compare single fields (`assert.equal(row.v, 1)`), never `deepEqual` a raw row with an object literal.
 - In-memory database for unit tests: `const db = openDb(':memory:');` (from `../src/db.ts`).
 - The module under test may not exist yet. That is expected. Never create it in a Test task.
 
@@ -107,6 +110,7 @@ export const SERVER_VERSION = '0.1.0';
 Files: `server/test/config.test.ts`
 
 Import `loadConfig` from `'../src/config.ts'`. Each test calls `loadConfig({...})` with a plain object.
+Below, "X throws `/re/`" always means `assert.throws(() => loadConfig(X), { message: /re/ });` (see Common rules).
 
 - `test('development defaults')`: `loadConfig({})` deep-equals
   `{ nodeEnv: 'development', host: '127.0.0.1', port: 3000, dbPath: 'data/j-messenger.sqlite', webDist: null, authMode: 'dev', mailServers: [{ id: 'mail-a', name: 'A사 메일', imapHost: '127.0.0.1', imapPort: 993 }, { id: 'mail-b', name: 'B사 메일', imapHost: '127.0.0.1', imapPort: 993 }], sessionDays: 7, secureCookies: false }`.
@@ -646,13 +650,41 @@ Files: `server/test/app-events.test.ts`
 
 Uses the helpers and Node's global `WebSocket`. Connect with the cookie header:
 `new WebSocket(base.replace('http', 'ws') + '/events', { headers: { cookie } } as never)`.
-Helper in the file: `function nextMessage(ws, ms = 2000): Promise<string | null>` resolves with the next `message` event data or `null` after `ms`.
 Wait for `open` before posting. Close sockets in `finally`.
+
+Events can arrive while the POST is still being awaited, so collect them from the moment the socket
+exists. Put this helper in the file exactly and read events only through it:
+```ts
+function inbox(ws: WebSocket) {
+  const queue: string[] = [];
+  const waiters: ((value: string | null) => void)[] = [];
+  ws.addEventListener('message', (event) => {
+    const waiter = waiters.shift();
+    if (waiter) waiter(String(event.data));
+    else queue.push(String(event.data));
+  });
+  return {
+    next(ms = 2000): Promise<string | null> {
+      if (queue.length > 0) return Promise.resolve(queue.shift() ?? null);
+      return new Promise((resolve) => {
+        const done = (value: string | null) => { clearTimeout(timer); resolve(value); };
+        const timer = setTimeout(() => {
+          const i = waiters.indexOf(done);
+          if (i >= 0) waiters.splice(i, 1);
+          resolve(null);
+        }, ms);
+        waiters.push(done);
+      });
+    },
+  };
+}
+```
+Create `const box = inbox(ws)` right after `new WebSocket(...)`. "next message" below means `await box.next()`, "nothing" means `await box.next(500)` is `null`.
 
 - `test('/events refuses connections without a session')`: without cookie the socket never opens: an `error` or `close` event happens and `open` does not (wait up to 2 s).
 - `test('members receive new messages')`: bob connects; alice creates a conversation with bob and posts `'이벤트'` → bob's next message parses to `{ type: 'message', message: {...} }` with `message.text '이벤트'`.
-- `test('non-members receive nothing')`: carol connects; alice posts in alice+bob → `nextMessage(carolWs, 500)` is `null`.
-- `test('a repeated clientMessageId is published once')`: bob connects; alice posts the same body twice → first `nextMessage` is an event, the next `nextMessage(ws, 500)` is `null`.
+- `test('non-members receive nothing')`: carol connects; alice posts in alice+bob → carol's `await box.next(500)` is `null`.
+- `test('a repeated clientMessageId is published once')`: bob connects; alice posts the same body twice → bob's first `await box.next()` is an event, the second `await box.next(500)` is `null`.
 - `test('the event arrives after the message is stored')`: when bob gets the event, `GET` messages as bob contains that message id.
 
 ## T70 Impl: app events

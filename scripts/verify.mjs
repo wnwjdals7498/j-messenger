@@ -13,13 +13,14 @@ const id = process.argv[2];
 //   absent {path}                      file must not exist
 //   contains / lacks {path, text}      file must (not) contain text
 //   testFirst {file, min, missing}     >= min top-level tests; running fails only because `missing` is absent
-//   registered {file, min, failing}    >= min tests register; failing: true = at least one must fail now
+//   registered {file, min, failing,    >= min tests register; failing: true = at least one must fail now;
+//               failingName}           failingName = that exact test must be among the failing ones
 //   npm {pkg, script, args}            `npm --prefix <pkg> run <script> -- <args>` exits 0
 //   dist {pkg, containsAny, lacks}     built assets under <pkg>/dist/assets contain one of containsAny, not lacks
 const T = {
   T32: [{ absent: 'web/test/composer-test-debug.ts' }],
   T33: [
-    { registered: 'web/test/styles.test.ts', min: 6, failing: true },
+    { registered: 'web/test/styles.test.ts', min: 6, failing: true, failingName: 'narrow screens show one pane at a time' },
     { contains: 'web/test/styles.test.ts', text: '[data-pane="list"] .chat' },
     { contains: 'web/test/styles.test.ts', text: '[data-pane="chat"] .sidebar' },
     { contains: 'web/test/styles.test.ts', text: 'white-space:\\s*pre-wrap/' },
@@ -31,7 +32,7 @@ const T = {
     { dist: 'web', containsAny: ['[data-pane=list] .chat', '[data-pane="list"] .chat'], lacks: `'"list"'` },
   ],
   T35: [
-    { registered: 'web/test/composer.test.ts', min: 10, failing: true },
+    { registered: 'web/test/composer.test.ts', min: 10, failing: true, failingName: 'too long text shows an error and does not send' },
     { lacks: 'web/test/composer.test.ts', text: 'removeAttribute' },
     { contains: 'web/test/composer.test.ts', text: 'shiftKey: true' },
     { contains: 'web/test/composer.test.ts', text: 'defaultPrevented, false' },
@@ -49,6 +50,8 @@ const T = {
   T38: [
     { contains: 'web/test/login.test.ts', text: 'submitted.length, 1' },
     { contains: 'web/test/login.test.ts', text: 'succeeded.length, 1' },
+    { lacks: 'web/test/login.test.ts', text: '\\"' },
+    { lacks: 'web/test/login.test.ts', text: 'strictEqual' },
     { npm: 'web', script: 'check', args: ['test/login.test.ts'] },
   ],
   T39: [
@@ -58,7 +61,7 @@ const T = {
     { contains: 'web/test/app-login.test.ts', text: '.composer-slot form.composer' },
     { contains: 'web/test/app-send.test.ts', text: "'.text'" },
     { contains: 'web/test/app-select.test.ts', text: 'after going back' },
-    { registered: 'web/test/app-select.test.ts', min: 6, failing: true },
+    { registered: 'web/test/app-select.test.ts', min: 6, failing: true, failingName: 'sending still works after going back to the list' },
   ],
   T40: [
     { lacks: 'web/src/app.ts', text: '__get' },
@@ -168,6 +171,13 @@ function countTests(file) {
 
 function check(c) {
   if (c.absent) return existsSync(join(root, c.absent)) ? fail(`${c.absent} must not exist`) : pass(`${c.absent} absent`);
+  if (c.dist) {
+    const dir = join(root, c.dist, 'dist', 'assets');
+    const css = existsSync(dir) ? readdirSync(dir).map((f) => readFileSync(join(dir, f), 'utf8')).join('\n') : '';
+    if (!c.containsAny.some((s) => css.includes(s))) return fail(`built ${c.dist}/dist must contain one of ${c.containsAny.join(' | ')}`);
+    if (c.lacks && css.includes(c.lacks)) return fail(`built ${c.dist}/dist must not contain ${c.lacks}`);
+    return pass(`built ${c.dist}/dist selectors ok`);
+  }
   if (c.contains || c.lacks) {
     const path = c.contains ?? c.lacks;
     if (!existsSync(join(root, path))) return fail(`${path} missing`);
@@ -193,6 +203,12 @@ function check(c) {
     const failed = Number((r.out.match(/^# fail (\d+)$/m) ?? [])[1] ?? 0);
     if (tests < c.min) return fail(`${c.registered}: ${tests} tests registered, need >= ${c.min}. Output:\n${r.out.slice(0, 1500)}`);
     if (c.failing && failed === 0) return fail(`${c.registered}: expected at least one failing test before the Impl task, all passed`);
+    if (c.failingName) {
+      const failedNames = [...r.out.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1].trim());
+      if (!failedNames.includes(c.failingName)) {
+        return fail(`${c.registered}: test '${c.failingName}' must fail before the Impl task (it catches the bug being fixed). Failing now: ${failedNames.join(', ') || 'none'}`);
+      }
+    }
     return pass(`${c.registered}: ${tests} tests registered, ${failed} failing${c.failing ? ' (expected)' : ''}`);
   }
   if (c.npm) {
@@ -200,13 +216,6 @@ function check(c) {
     if (c.args?.length) args.push('--', ...c.args);
     const r = run('npm', args);
     return r.code === 0 ? pass(`npm ${args.join(' ')}`) : fail(`npm ${args.join(' ')} exited ${r.code}. Output tail:\n${r.out.slice(-2500)}`);
-  }
-  if (c.dist) {
-    const dir = join(root, c.dist, 'dist', 'assets');
-    const css = existsSync(dir) ? readdirSync(dir).map((f) => readFileSync(join(dir, f), 'utf8')).join('\n') : '';
-    if (!c.containsAny.some((s) => css.includes(s))) return fail(`built ${c.dist}/dist must contain one of ${c.containsAny.join(' | ')}`);
-    if (c.lacks && css.includes(c.lacks)) return fail(`built ${c.dist}/dist must not contain ${c.lacks}`);
-    return pass(`built ${c.dist}/dist selectors ok`);
   }
   return fail(`unknown check ${JSON.stringify(c)}`);
 }

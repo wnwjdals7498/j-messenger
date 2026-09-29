@@ -105,7 +105,9 @@ Files: `web/test/sidebar.test.ts`, `web/test/dom.test.ts`
 
 Files: `web/test/login.test.ts`
 
-In `test('valid input submits a trimmed username and calls onSuccess')` record every call:
+Rewrite the whole file to match section T20 of `docs/tasks/web.md`, using only `assert.equal`, `assert.deepEqual`,
+`assert.ok` and `assert.rejects`, and no `\"` escapes (use `'button[type="submit"]'`). In addition,
+in `test('valid input submits a trimmed username and calls onSuccess')` record every call:
 ```ts
 const submitted: LoginInput[] = [];
 const succeeded: User[] = [];
