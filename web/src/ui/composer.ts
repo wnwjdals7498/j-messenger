@@ -8,7 +8,7 @@ export function mountComposer(
   clear(root);
   const doc = root.ownerDocument as Document;
 
-  const form = el(doc, 'form', { className: 'composer' });
+  const form = el(doc, 'form', { className: 'composer', attrs: { novalidate: '' } });
   const textarea = el(doc, 'textarea', {
     attrs: { name: 'text', rows: '2', maxlength: '4000', 'aria-label': '메시지 입력', placeholder: '메시지를 입력하세요' }
   });

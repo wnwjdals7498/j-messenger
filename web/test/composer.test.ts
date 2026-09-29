@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+﻿import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDom, tick, settle, keydown } from './helpers/dom.ts';
 import { mountComposer } from '../src/ui/composer.ts';
@@ -10,8 +10,8 @@ function setup(onSend: (text: string) => Promise<boolean>) {
   return {
     ...dom,
     form,
-    textarea: form.querySelector('textarea[name=\"text\"]')!,
-    button: form.querySelector('button[type=\"submit\"]')!,
+    textarea: form.querySelector('textarea[name="text"]')!,
+    button: form.querySelector('button[type="submit"]')!,
     error: form.querySelector('.composer-error')!
   };
 }
@@ -40,13 +40,14 @@ test('Enter sends and Shift+Enter does not', async () => {
   const calls: string[] = [];
   const { window, textarea } = setup(async (t) => { calls.push(t); return true; });
   textarea.value = 'a';
-  keydown(window, textarea, { key: 'Enter', shiftKey: true });
+  const shifted = keydown(window, textarea, { key: 'Enter', shiftKey: true });
   await settle();
   assert.deepEqual(calls, []);
+  assert.equal(shifted.defaultPrevented, false);
   const ev = keydown(window, textarea, { key: 'Enter' });
   await settle();
   assert.deepEqual(calls, ['a']);
-  assert.strictEqual(ev.defaultPrevented, true);
+  assert.equal(ev.defaultPrevented, true);
 });
 
 test('Enter while composing Korean text does not send', async () => {
@@ -71,8 +72,6 @@ test('empty text shows an error and does not send', async () => {
 test('too long text shows an error and does not send', async () => {
   const calls: string[] = [];
   const { textarea, button, error } = setup(async (t) => { calls.push(t); return true; });
-  // Remove maxlength temporarily to test 4001 chars
-  textarea.removeAttribute('maxlength');
   textarea.value = 'x'.repeat(4001);
   button.click();
   await settle();
@@ -111,7 +110,7 @@ test('a failed send keeps the text and shows an error', async () => {
 
 test('a rejected send behaves like a failed send', async () => {
   const calls: string[] = [];
-  const { textarea, button, error } = setup(async (t) => { calls.push(t); throw new Error('x'); });
+  const { textarea, button, error } = setup(async (t) => { calls.push(t); return Promise.reject(new Error('x')); });
   textarea.value = 'a';
   button.click();
   await settle();
