@@ -15,6 +15,8 @@ export const SAFE_LOG_FIELD_KEYS = new Set([
   'schemaVersion',
   'count',
   'processedCount',
+  'messageCount',
+  'fileCount',
   'failedCount',
   'skippedCount',
   'byteCount',

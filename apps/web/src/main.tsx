@@ -5,6 +5,7 @@ import {
   type ClientSocket,
 } from '@j-messenger/client-core';
 import { MessengerApp } from '@j-messenger/client-react';
+import { createAndroidFilesBridge } from './android-files.js';
 
 function socketFactory(path: string): ClientSocket {
   const url = new URL(path, window.location.href);
@@ -42,11 +43,15 @@ function socketFactory(path: string): ClientSocket {
 }
 
 const client = createMessengerClient({ socketFactory });
+const androidFiles = createAndroidFilesBridge();
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('앱을 표시할 영역을 찾을 수 없습니다.');
 createRoot(rootElement).render(
   <StrictMode>
-    <MessengerApp client={client} />
+    <MessengerApp
+      client={client}
+      {...(androidFiles ? { files: androidFiles } : {})}
+    />
   </StrictMode>,
 );
 void client.resumeSession().catch(() => undefined);

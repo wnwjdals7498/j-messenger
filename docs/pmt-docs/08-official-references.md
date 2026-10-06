@@ -18,6 +18,8 @@
 | S12 | [Android foreground services](https://developer.android.com/develop/background-work/services/fgs) | 사용자에게 보이는 장기 작업과 foreground service 조건 |
 | S13 | [Windows push notifications](https://learn.microsoft.com/en-us/windows/apps/develop/notifications/push-notifications/) | WNS를 사용하는 Windows 푸시 경로. 외부 중계 없는 요구와 별도 검토 |
 | S14 | [Vitest](https://vitest.dev/guide/), [Playwright](https://playwright.dev/docs/intro) | 테스트 도구의 설정·브라우저 시험 경로 |
+| S15 | [Nginx HTTP proxy](https://nginx.org/en/docs/http/ngx_http_proxy_module.html), [WebSocket proxy](https://nginx.org/en/docs/http/websocket.html) | VM443 진입점·내부 HTTPS upstream 검증·WSS upgrade·요청/응답 스트리밍. Rocky10 AppStream nginx1.26.3 실제 설치 확인 |
+| S16 | [Microsoft 인증서 저장소](https://learn.microsoft.com/en-us/windows-server/identity/ad-cs/inspect-certificates-manage-certificate-stores), [Import-Certificate](https://learn.microsoft.com/en-us/powershell/module/pki/import-certificate) | 공개 CA의 실제 SHA-256·목적·CurrentUser 범위 확인, 사용자 승인 후 신뢰 등록과 제거 절차 |
 
 모듈 개수, React/Fastify 채택, API 이름, 재시도·보관·성능 수치는 프로젝트 설계 판단이다. 공식 문서가 이 조합의 성능이나 종료 알림을 보증한다고 해석하지 않는다. 대상 메일 제품, OS 푸시 허용 여부, 실제 패치 버전은 확정 자료가 생기면 이 표에 공식 링크를 추가한다.
 

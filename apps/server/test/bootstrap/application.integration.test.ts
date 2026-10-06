@@ -138,6 +138,9 @@ describe('application bootstrap integration', () => {
   });
   afterEach(async () => {
     if (app) await app.close();
+    expect(
+      logs.some((record) => record.event === 'logging.entry.dropped'),
+    ).toBe(false);
     await rm(root, { recursive: true, force: true });
   });
 

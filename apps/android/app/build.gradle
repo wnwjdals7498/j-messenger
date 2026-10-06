@@ -1,0 +1,97 @@
+import java.io.ByteArrayInputStream
+import java.security.MessageDigest
+import java.security.cert.CertificateFactory
+
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.jmessenger.android'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.jmessenger.android'
+        minSdk 24
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.lab'
+            versionNameSuffix '-lab'
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main.assets.srcDir(layout.buildDirectory.dir('generated/web-assets').get().asFile)
+        debug.res.srcDir(layout.buildDirectory.dir('generated/debug-res').get().asFile)
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.17.1'
+    implementation 'androidx.activity:activity:1.13.0'
+    androidTestImplementation 'androidx.test:runner:1.7.0'
+    androidTestImplementation 'androidx.test:core:1.7.0'
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
+    androidTestImplementation 'androidx.test.espresso:espresso-web:3.7.0'
+    androidTestImplementation 'androidx.test.uiautomator:uiautomator:2.3.0'
+}
+
+def webDist = rootProject.layout.projectDirectory.dir('../web/dist')
+def webAssets = layout.buildDirectory.dir('generated/web-assets')
+tasks.register('syncWebAssets', Sync) {
+    from(webDist)
+    into(webAssets)
+    doFirst {
+        if (!webDist.file('index.html').asFile.isFile()) {
+            throw new GradleException("Web build missing at ${webDist.asFile}; build apps/web before assembling Android")
+        }
+    }
+    doLast {
+        def indexFile = webAssets.get().file('index.html').asFile
+        def html = indexFile.getText('UTF-8')
+        html = html.replace('src="/assets/', 'src="/_app/assets/')
+        html = html.replace('href="/assets/', 'href="/_app/assets/')
+        indexFile.write(html, 'UTF-8')
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('syncWebAssets')
+}
+
+def labCaFile = rootProject.layout.projectDirectory.file('../../.tools/vm-deploy/tls/ca.crt')
+tasks.register('syncDebugVmCa', Copy) {
+    from(labCaFile)
+    into(layout.buildDirectory.dir('generated/debug-res/raw'))
+    rename { 'vm_lab_ca.crt' }
+    doFirst {
+        if (!labCaFile.asFile.isFile()) {
+            throw new GradleException("Lab CA certificate missing at ${labCaFile.asFile}")
+        }
+        def certificate = CertificateFactory.getInstance('X.509')
+                .generateCertificate(new ByteArrayInputStream(labCaFile.asFile.bytes))
+        def fingerprint = MessageDigest.getInstance('SHA-256').digest(certificate.encoded)
+                .collect { String.format('%02X', it & 0xff) }.join()
+        if (fingerprint != 'DA1DDD9CB6B2B3C05A3AC9771D45748B7EA888AF10D850A01CBD11896B8B31E0') {
+            throw new GradleException('Lab CA certificate fingerprint does not match the approved VM CA')
+        }
+    }
+}
+
+tasks.matching { it.name == 'preDebugBuild' }.configureEach {
+    dependsOn tasks.named('syncDebugVmCa')
+}

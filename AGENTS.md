@@ -25,6 +25,8 @@
 | 기능별 입출력·Test·로깅 확인 | [기능 명세서](docs/pmt-docs/10-feature-specifications.md) |
 | 행동 기반 구현 범위·6-luna 병렬 실행 | [상세계획](docs/pmt-docs/11-implementation-plan.md) |
 | 최신 실행 범위·구현 상태 | [실행 현황](docs/pmt-docs/12-execution-status.md) |
+| 실제 VM 배포·TLS·journal·접속 | [VM 실행 기록](docs/pmt-docs/13-vm-deployment.md) |
+| Android Web APK·Pixel10 검증 | [Android 실행 기록](docs/pmt-docs/14-android-web-app.md) |
 
 ## 반드시 지킬 경계
 

@@ -283,14 +283,14 @@ describe('client-core', () => {
     await c.login({ serverId: 'lab', username: 'a', password: 'secret' });
     onSocketMessage?.({
       type: 'ready',
-      cursor: 'ready:opaque:H',
-      position: '50',
+      cursor: 'bound:opaque:H',
+      position: '100',
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(syncQueries).toHaveLength(2);
-    expect(syncQueries[0]?.searchParams.get('after')).toBe('ready:opaque:H');
-    expect(syncQueries[0]?.searchParams.get('through')).toBeNull();
+    expect(syncQueries[0]?.searchParams.get('after')).toBe('snap:opaque');
+    expect(syncQueries[0]?.searchParams.get('through')).toBe('bound:opaque:H');
     expect(syncQueries[1]?.searchParams.get('after')).toBe('next:not-a-number');
     expect(syncQueries[1]?.searchParams.get('through')).toBe('bound:opaque:H');
     expect(c.getSnapshot().syncCursor).toBe('last:token');
@@ -365,7 +365,7 @@ describe('client-core', () => {
             nextCursor:
               syncCount === 1 ? 'cursor:before-reset' : 'cursor:after-reset',
             hasMore: false,
-            through: syncCount === 1 ? 'through:initial' : 'ready:reset-bound',
+            through: syncCount === 1 ? 'ready:initial' : 'ready:reset-bound',
             throughPosition: '50',
             scannedThrough: '50',
           });
@@ -387,7 +387,7 @@ describe('client-core', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(snapshots).toBeGreaterThanOrEqual(3);
+    expect(snapshots).toBeGreaterThanOrEqual(2);
     expect(c.getSnapshot().syncCursor).toBe('cursor:after-reset');
     const activeMessage = { ...message, text: 'body', contentExpired: false };
     onSocketMessage?.({
@@ -502,92 +502,163 @@ describe('client-core', () => {
     c.dispose();
   });
 
-  it('buffers ready-era events while the bootstrap snapshots are still in flight', async () => {
+  it('syncs changes after one snapshot, merges duplicates, and reconnects from the last cursor', async () => {
     let onSocketMessage: ((value: unknown) => void) | undefined;
-    let resolveSecondList!: (r: Response) => void;
-    let listCalls = 0;
-    const socket = {
-      send: () => undefined,
-      close: () => undefined,
-      onMessage: (cb: (v: unknown) => void) => {
-        onSocketMessage = cb;
-        return () => undefined;
-      },
-      onClose: () => () => undefined,
+    let onSocketClose: (() => void) | undefined;
+    let resolveFirstSync!: (r: Response) => void;
+    const sockets: { emit(value: unknown): void; close(): void }[] = [];
+    const syncQueries: URL[] = [];
+    let conversationGets = 0;
+    let messageGets = 0;
+    let syncCalls = 0;
+    const clock = new FakeClock();
+    const group = {
+      id: message.conversationId,
+      kind: 'direct' as const,
+      title: null,
+      memberIds: [me.id, message.senderId],
+      createdAt: message.createdAt,
+      lastMessageAt: message.createdAt,
     };
-    const c = createMessengerClient({
-      baseUrl: 'http://local',
-      socketFactory: () => socket,
-      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
-        const req = new Request(input, init);
-        const url = new URL(req.url);
-        if (url.pathname.endsWith('/session')) return response(null, 204);
-        if (url.pathname.endsWith('/me')) return response({ data: me });
-        if (url.pathname.endsWith('/conversations')) {
-          listCalls++;
-          if (listCalls === 2)
-            return new Promise<Response>((resolve) => {
-              resolveSecondList = resolve;
-            });
-          return response({
-            data: [],
-            page: { nextCursor: null },
-            snapshotCursor: 'list:opaque',
-            snapshotPosition: '100',
-          });
-        }
-        if (url.pathname.endsWith('/sync'))
-          return response({
-            data: [],
-            nextCursor: 'sync:after-bootstrap',
-            hasMore: false,
-            through: 'through:boot',
-            throughPosition: '100',
-            scannedThrough: '100',
-          });
-        return response({
-          data: [],
-          page: { nextCursor: null },
-          snapshotCursor: 'messages:opaque',
-          snapshotPosition: '105',
-        });
-      }) as typeof fetch,
-    });
-    await c.login({ serverId: 'lab', username: 'a', password: 'secret' });
-    onSocketMessage?.({
-      type: 'ready',
-      cursor: 'ready:bootstrap',
-      position: '100',
-    });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const postSnapshotMessage = {
+    const syncedMessage = {
       ...message,
+      text: 'snapshot and sync duplicate',
+      contentExpired: false,
+      fileIds: [],
+    };
+    const bufferedMessage = {
+      ...syncedMessage,
       id: '9007199254740996',
       clientMessageId: '00000000-0000-4000-8000-000000000006',
-      text: 'buffered',
-      contentExpired: false,
+      text: 'arrived while sync was in flight',
     };
-    onSocketMessage?.({
-      eventId: '110',
+    const event = (eventId: string, data: typeof syncedMessage) => ({
+      eventId,
       type: 'message.created.v1',
       occurredAt: message.createdAt,
       conversationId: message.conversationId,
-      data: postSnapshotMessage,
+      data,
     });
-    resolveSecondList(
+    const c = createMessengerClient({
+      baseUrl: 'http://local',
+      clock,
+      socketFactory: () => {
+        const current = {
+          emit(value: unknown) {
+            onSocketMessage?.(value);
+          },
+          close() {
+            onSocketClose?.();
+          },
+        };
+        sockets.push(current);
+        return {
+          send: () => undefined,
+          close: () => undefined,
+          onMessage: (cb: (value: unknown) => void) => {
+            onSocketMessage = cb;
+            return () => {
+              if (onSocketMessage === cb) onSocketMessage = undefined;
+            };
+          },
+          onClose: (cb: () => void) => {
+            onSocketClose = cb;
+            return () => {
+              if (onSocketClose === cb) onSocketClose = undefined;
+            };
+          },
+        };
+      },
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const req = new Request(input, init);
+        const url = new URL(req.url);
+        if (url.pathname.endsWith('/me')) return response({ data: me });
+        if (url.pathname.endsWith('/conversations')) {
+          conversationGets++;
+          return response({
+            data: [group],
+            page: { nextCursor: null },
+            snapshotCursor: 'snapshot:opaque:C5',
+            snapshotPosition: '5',
+          });
+        }
+        if (url.pathname.endsWith(`/conversations/${group.id}/messages`)) {
+          messageGets++;
+          return response({
+            data: [syncedMessage],
+            page: { nextCursor: null },
+            snapshotCursor: 'message-snapshot:opaque:C7',
+            snapshotPosition: '7',
+          });
+        }
+        if (url.pathname.endsWith('/sync')) {
+          syncQueries.push(url);
+          syncCalls++;
+          if (syncCalls === 1)
+            return new Promise<Response>((resolve) => {
+              resolveFirstSync = resolve;
+            });
+          return response({
+            data: [],
+            nextCursor: 'sync:cursor:page2',
+            hasMore: false,
+            through: 'ready:cursor:H9',
+            throughPosition: '9',
+            scannedThrough: '9',
+          });
+        }
+        return response({ data: [] });
+      }) as typeof fetch,
+    });
+    await c.resumeSession();
+    expect(conversationGets).toBe(1);
+    expect(messageGets).toBe(1);
+    expect(c.getSnapshot().syncCursor).toBe('snapshot:opaque:C5');
+
+    sockets[0]!.emit({
+      type: 'ready',
+      cursor: 'ready:cursor:H8',
+      position: '8',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(syncQueries[0]?.searchParams.get('after')).toBe(
+      'snapshot:opaque:C5',
+    );
+    expect(syncQueries[0]?.searchParams.get('through')).toBe('ready:cursor:H8');
+    sockets[0]!.emit(event('9', bufferedMessage));
+    resolveFirstSync(
       response({
-        data: [],
-        page: { nextCursor: null },
-        snapshotCursor: 'list:second',
-        snapshotPosition: '102',
+        data: [event('7', syncedMessage)],
+        nextCursor: 'sync:cursor:page1',
+        hasMore: false,
+        through: 'ready:cursor:H8',
+        throughPosition: '8',
+        scannedThrough: '8',
       }),
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(conversationGets).toBe(1);
+    expect(messageGets).toBe(1);
+    expect(c.getSnapshot().messages).toHaveLength(2);
+    expect(
+      c.getSnapshot().messages.find((item) => item.id === syncedMessage.id)
+        ?.text,
+    ).toBe('snapshot and sync duplicate');
+    expect(c.getSnapshot().syncCursor).toBe('sync:cursor:page1');
+
+    sockets[0]!.close();
+    clock.runLatest();
+    expect(sockets).toHaveLength(2);
+    sockets[1]!.emit({
+      type: 'ready',
+      cursor: 'ready:cursor:H9',
+      position: '9',
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(c.getSnapshot().messages.map((m) => m.id)).toContain(
-      postSnapshotMessage.id,
-    );
-    expect(c.getSnapshot().syncCursor).toBe('sync:after-bootstrap');
+    expect(syncQueries[1]?.searchParams.get('after')).toBe('sync:cursor:page1');
+    expect(syncQueries[1]?.searchParams.get('through')).toBe('ready:cursor:H9');
+    expect(conversationGets).toBe(1);
+    expect(messageGets).toBe(1);
     c.dispose();
   });
 
@@ -624,9 +695,9 @@ describe('client-core', () => {
             data: [],
             nextCursor: `page:${syncCalls}`,
             hasMore: syncCalls === 1,
-            through: syncCalls === 1 ? 'bound:one' : 'bound:two',
-            throughPosition: syncCalls === 1 ? '10' : '11',
-            scannedThrough: syncCalls === 1 ? '8' : '10',
+            through: syncCalls === 1 ? 'ready:opaque' : 'bound:two',
+            throughPosition: syncCalls === 1 ? '20' : '21',
+            scannedThrough: syncCalls === 1 ? '10' : '20',
           });
         }
         return response({
@@ -638,7 +709,11 @@ describe('client-core', () => {
       }) as typeof fetch,
     });
     await c.login({ serverId: 'lab', username: 'a', password: 'secret' });
-    onSocketMessage?.({ type: 'ready', cursor: 'ready:opaque', position: '5' });
+    onSocketMessage?.({
+      type: 'ready',
+      cursor: 'ready:opaque',
+      position: '20',
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(syncCalls).toBe(2);
@@ -679,8 +754,8 @@ describe('client-core', () => {
             data: [],
             nextCursor: 'page:opaque',
             hasMore: true,
-            through: syncCalls === 1 ? 'bound:first' : 'bound:changed',
-            throughPosition: syncCalls === 1 ? '20' : '21',
+            through: syncCalls === 1 ? 'ready:opaque' : 'bound:changed',
+            throughPosition: '20',
             scannedThrough: syncCalls === 1 ? '10' : '20',
           });
         }
@@ -693,7 +768,11 @@ describe('client-core', () => {
       }) as typeof fetch,
     });
     await c.login({ serverId: 'lab', username: 'a', password: 'secret' });
-    onSocketMessage?.({ type: 'ready', cursor: 'ready:opaque', position: '5' });
+    onSocketMessage?.({
+      type: 'ready',
+      cursor: 'ready:opaque',
+      position: '20',
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(syncCalls).toBe(2);

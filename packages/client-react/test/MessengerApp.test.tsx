@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -229,6 +230,48 @@ async function login(user = userEvent.setup()) {
 }
 
 describe('MessengerApp', () => {
+  it('stops read receipt retries after a failure until another visibility event', async () => {
+    let notify: ((entries: IntersectionObserverEntry[]) => void) | undefined;
+    let target: Element | undefined;
+    class Observer {
+      constructor(callback: (entries: IntersectionObserverEntry[]) => void) {
+        notify = callback;
+      }
+      observe(element: Element) {
+        target = element;
+      }
+      disconnect() {}
+    }
+    vi.stubGlobal('IntersectionObserver', Observer);
+    const { client } = setup();
+    const advance = vi
+      .fn<typeof client.advanceRead>()
+      .mockRejectedValueOnce(new Error('rate_limited'))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    render(<MessengerApp client={{ ...client, advanceRead: advance }} />);
+    try {
+      const user = await login();
+      await user.click(screen.getByRole('button', { name: /Alice, Bob/ }));
+      await screen.findByText('안녕하세요', { selector: 'p.message-text' });
+      await waitFor(() => expect(target).toBeDefined());
+      const visible = () =>
+        notify?.([
+          { isIntersecting: true, target } as IntersectionObserverEntry,
+        ]);
+      await act(async () => {
+        visible();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(advance).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        visible();
+      });
+      expect(advance).toHaveBeenCalledTimes(2);
+    } finally {
+      client.dispose();
+    }
+  });
+
   it('logs in, sends with Enter, preserves Shift+Enter and IME composition, and renders markup as text', async () => {
     const user = userEvent.setup();
     const { client, calls } = setup({ messages: [] });

@@ -425,6 +425,9 @@ export function createMessengerClient(options: MessengerOptions = {}) {
       messages: Object.freeze(
         [...byId.values()].sort((a, b) => cmp(a.id, b.id)),
       ),
+      // Conversation list snapshots use the same signed user/server/epoch cursor
+      // format as sync. Events after this snapshot are recovered at WS ready.
+      syncCursor: conversations.snapshotCursor,
       snapshotPosition: conversations.snapshotPosition,
       snapshotPositionByConversation: Object.freeze(positions),
     });

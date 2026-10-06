@@ -179,8 +179,10 @@ export function MessengerApp({ client, files }: MessengerAppProps) {
     if (!container || typeof IntersectionObserver === 'undefined') return;
     let highestVisible = lastRead.current[selectedConversationId] ?? '0';
     let requestInFlight = false;
+    let active = true;
     const advance = () => {
       if (
+        !active ||
         requestInFlight ||
         BigInt(highestVisible) <=
           BigInt(lastRead.current[selectedConversationId] ?? '0')
@@ -191,12 +193,14 @@ export function MessengerApp({ client, files }: MessengerAppProps) {
       void client
         .advanceRead(selectedConversationId, messageId)
         .then(() => {
+          if (!active) return;
           lastRead.current[selectedConversationId] = messageId;
-        })
-        .catch(() => undefined)
-        .finally(() => {
           requestInFlight = false;
           advance();
+        })
+        .catch(() => {
+          // A later visibility event can retry; a failed request must not loop.
+          requestInFlight = false;
         });
     };
     const observer = new IntersectionObserver(
@@ -215,7 +219,10 @@ export function MessengerApp({ client, files }: MessengerAppProps) {
       '[data-message-id]',
     ))
       observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      active = false;
+      observer.disconnect();
+    };
   }, [client, messages, selectedConversationId, snapshot.user]);
 
   async function handleLogin(event: FormEvent) {
