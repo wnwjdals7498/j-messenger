@@ -26,6 +26,17 @@
 
 ![메시지 저장과 실시간 전달](docs/pmt-docs/workflows/message-delivery.preview.png)
 
+## 이번에 배운 내용: outbox와 WSS
+
+이번 구현에서 처음 이해한 두 개념을[학습 기록](docs/pmt-docs/17-outbox-wss-learning.md)에 정리했다.
+
+- **outbox:** 전달해야 할 변화를 DB에 남기는 기록. 서버 코드가 메시지와 사건을 같은 transaction에 저장해 저장 후 전달 기록이 빠지는 일을 막는다.
+- **WSS:** 연결을 유지하며 사건을 전달하는 TLS 암호화 WebSocket. 우리는 발송·조회는 HTTPS, 실시간 수신 사건은 WSS로 나눴다.
+- **250ms 반복 확인의 주체는 서버 realtime 모듈**이다. SQLite는 저장을 담당하고, 앱·웹은 열린 WSS 연결에서 사건을 받는다.
+- 앱은 받은 메시지를 번호로 병합하고 재연결 시 sync로 누락을 복구한다. 저장·전송·수신·읽음은 각 단계이며 OS 알림은 현재 비활성인 별도 기능이다.
+
+상세 기록에는 용어·구현 순서·실제 코드·공식 근거와 Archify 도식 링크를 함께 두었다.
+
 ## 로컬 실행
 
 Node 22.18 이상이 필요하다. 저장소 루트에서 다음 순서로 실행한다.
@@ -69,6 +80,7 @@ Android는 기존 Web 화면을 APK 안에 포함하고 VM의 HTTPS·WSS에 직�
 | [Android 실행 기록](docs/pmt-docs/14-android-web-app.md) | Web APK·Pixel10·VM 연결·파일·복구 검증 |
 | [구현·환경·통신·결론](docs/pmt-docs/15-implementation-guide.md) | 현재 작업 정리·재현 절차·모듈별 입출력·기술 방식·시험 한계 |
 | [Archify 코드 워크플로우](docs/pmt-docs/16-code-workflows.md) | 수정 가능한 JSON·인터랙티브 HTML·소스 근거·검증 요약 |
+| [이번에 배운 outbox·WSS](docs/pmt-docs/17-outbox-wss-learning.md) | 쉬운 개념·실제 구현·서버/앱 역할·수신과 알림·공식 근거 |
 | [기존 환경](docs/env.md) | 과거 호스트·WSL·VM 실측, 재사용 전 확인 |
 | [기존 검증 기록](docs/verification.md) | 환경 구축 시험 이력 |
 
