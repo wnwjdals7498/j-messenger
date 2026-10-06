@@ -1,0 +1,22 @@
+{
+  "vmName": "j-messenger-lab",
+  "hostname": "j-messenger-lab",
+  "vmIp": "10.77.0.10",
+  "networkPrefix": "10.77.0.0/24",
+  "gateway": "10.77.0.1",
+  "dns": ["8.8.8.8", "1.1.1.1"],
+  "interfaceName": "eth0",
+  "appUser": "jmsg",
+  "sshAppAlias": "jm-vm",
+  "sshAdminAlias": "jm-vm-admin",
+  "switchName": "JMessengerInternal",
+  "natName": "JMessengerNat",
+  "protocol": "https",
+  "publicPort": 443,
+  "backendProtocol": "https",
+  "backendPort": 3443,
+  "redirectHttp": false,
+  "httpPort": 80,
+  "allowedSources": ["10.77.0.0/24", "172.16.0.0/12"],
+  "firewallZone": "jm-clients"
+}

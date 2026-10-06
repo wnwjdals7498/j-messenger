@@ -13,6 +13,8 @@
     "check:client": "npm run check --workspace=@j-messenger/client-core",
     "check:ui": "npm run check --workspace=@j-messenger/client-react",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "setup:vm": "node scripts/setup-vm.mjs",
+    "test:deploy": "node --test tests/deploy/vm-profile.test.mjs",
     "check": "node scripts/check-workspace.mjs",
     "build": "node scripts/build-workspace.mjs",
     "dev:server": "npm run build && node scripts/dev-server.mjs",

@@ -23,6 +23,7 @@
 | [15 구현·시험 정리](15-implementation-guide.md) | 실제 작업·환경 구축·모듈 통신·기술 방식·시험 결과·결론 |
 | [16 코드 워크플로우](16-code-workflows.md) | Archify의 소스 기반 HTML/JSON·호출·저장·재연결·파일 경로 |
 | [17 outbox·WSS 학습 기록](17-outbox-wss-learning.md) | 이번 구현에서 배운 개념·transaction·poll·WSS·병합/복구·코드와 공식 근거 |
+| [18 VM 설정 방법론](18-vm-setup-guide.md) | 대화형/JSON 프로필·이름/IP/HTTP 선택·Hyper-V/게스트/TLS/배포/웹 적용·검증 |
 
 규칙 우선순위: 현재 사용자 지시 → [AGENTS.md](../../AGENTS.md) → 이 참조 문서 → 작업별 명세. 기술 사실의 근거는 공식 문서만 사용한다. 외부 문서는 기술 검증 자료이며 프로젝트 요구사항을 임의로 바꾸는 근거가 아니다.
 

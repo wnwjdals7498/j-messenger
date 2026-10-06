@@ -50,6 +50,8 @@ npm run test:e2e
 
 ### 준비된 j-messenger-lab VM 재현
 
+다른 이름·IP·HTTP/HTTPS를 선택하는 새 구축에는[VM 설정 방법론18](18-vm-setup-guide.md)과 `npm run setup:vm`을 사용한다. 아래는 기존lab을 재현하는 기록이다.
+
 VM OS는 Rocky Linux10.2, 런타임은 Node22.23.2/npm10.9.8이다. `jmsg`는 앱·데이터·user service를 소유하며 sudo가 없다. `jjm`은 관리 작업용이다. 아래 배포 절차는 이미 준비한 계정·Node·SSH·사설망·firewall의 `jm-clients` 존을 전제로 한다. 새 VM 생성 이력은 `docs/env.md`/`docs/vm-runbook.md`에 있고 현재 상태와 대조해야 한다.
 
 1. WSL Ubuntu에 `jm-vm`(jmsg)·`jm-vm-admin`(jjm) SSH alias와 host key를 준비한다. `BatchMode=yes`, `StrictHostKeyChecking=yes`를 유지해 지정 hostname을 확인한다.

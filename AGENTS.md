@@ -30,6 +30,7 @@
 | 실제 구현·시험 환경 재현·모듈 통신·결론 | [구현 정리](docs/pmt-docs/15-implementation-guide.md) |
 | 커밋된 코드의 호출·저장·복구 흐름 | [Archify 워크플로우](docs/pmt-docs/16-code-workflows.md) |
 | outbox·WSS 개념·처리 주체·구현 학습 | [학습 기록](docs/pmt-docs/17-outbox-wss-learning.md) |
+| VM 생성·이름/IP/HTTP 선택·게스트/배포 적용 | [VM 설정 방법론](docs/pmt-docs/18-vm-setup-guide.md) |
 
 ## 반드시 지킬 경계
 

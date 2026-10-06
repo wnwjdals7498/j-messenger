@@ -22,23 +22,50 @@ param(
     [ValidateSet('Create', 'Finalize', 'Route')]
     [string] $Phase = 'Create',
     [string] $VmName = 'j-messenger-lab',
+    [string] $VmAddress = '10.77.0.10',
     [string] $SwitchName = 'JMessengerInternal',
     [string] $NatName = 'JMessengerNat',
     [string] $HostAddress = '10.77.0.1',
     [string] $NatPrefix = '10.77.0.0/24',
-    [string] $MacAddress = '00155D004206',
+    [string] $MacAddress,
     [ValidateRange(1536, 4096)]
     [int] $InstallMemoryMB = 2048,
     [ValidateRange(512, 4096)]
     [int] $FinalMemoryMB = 1024,
     [string] $IsoPath,
     [switch] $Persist,
-    [string] $RootPath = (Join-Path $env:PUBLIC 'Documents\Hyper-V\j-messenger-lab')
+    [string] $RootPath
 )
 
 $ErrorActionPreference = 'Stop'
+foreach ($label in @($VmName,$SwitchName,$NatName)) {
+    if ($label -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$') { throw 'VM, switch and NAT names must use letters, digits, dot, underscore or hyphen.' }
+}
+function Convert-VmIPv4([string] $Address) {
+    $parsed = $null
+    if (![Net.IPAddress]::TryParse($Address,[ref]$parsed) -or $parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $parsed.ToString() -cne $Address) { throw 'Expected canonical IPv4 address.' }
+    $bytes=$parsed.GetAddressBytes()
+    return [uint64]$bytes[0]*16777216 + [uint64]$bytes[1]*65536 + [uint64]$bytes[2]*256 + [uint64]$bytes[3]
+}
+$prefixParts=$NatPrefix.Split('/')
+if ($prefixParts.Count -ne 2 -or $prefixParts[1] -notmatch '^(?:[1-9]|[12][0-9]|30)$') { throw 'Invalid NAT IPv4 prefix.' }
+$networkNumber=Convert-VmIPv4 $prefixParts[0]
+$networkSize=[uint64][Math]::Pow(2,32-[int]$prefixParts[1])
+$hostNumber=Convert-VmIPv4 $HostAddress
+$guestNumber=Convert-VmIPv4 $VmAddress
+if ($networkNumber % $networkSize -ne 0 -or $hostNumber -le $networkNumber -or $hostNumber -ge $networkNumber+$networkSize-1 -or $guestNumber -le $networkNumber -or $guestNumber -ge $networkNumber+$networkSize-1 -or $hostNumber -eq $guestNumber) { throw 'Host/VM addresses must be distinct usable addresses inside the NAT prefix.' }
+if (!$RootPath) { $RootPath=Join-Path $env:PUBLIC ('Documents\Hyper-V\'+$VmName) }
+if (!$MacAddress) {
+    if ($VmName -eq 'j-messenger-lab') { $MacAddress='00155D004206' }
+    else {
+        $hasher=[Security.Cryptography.SHA256]::Create()
+        try { $hashBytes=$hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($VmName)) } finally { $hasher.Dispose() }
+        $MacAddress='00155D'+(($hashBytes[0..2] | ForEach-Object { $_.ToString('X2') }) -join '')
+    }
+}
+if ($MacAddress -notmatch '^[0-9A-Fa-f]{12}$') { throw 'Invalid static MAC address.' }
 Import-Module Hyper-V -ErrorAction Stop
-$TaskName = 'j-messenger WSL-VM forwarding'
+$TaskName = 'j-messenger WSL-VM forwarding '+$VmName
 
 if ($Phase -eq 'Route') {
     $filter = "(`$_.InterfaceAlias -like 'vEthernet (WSL*' -or `$_.InterfaceAlias -eq 'vEthernet ($SwitchName)')"
@@ -80,6 +107,10 @@ if ([string]::IsNullOrWhiteSpace($IsoPath)) { throw 'Create requires -IsoPath.' 
 $iso = (Resolve-Path -LiteralPath $IsoPath -ErrorAction Stop).ProviderPath
 if ([IO.Path]::GetExtension($iso) -ine '.iso') { throw 'IsoPath must be an ISO file.' }
 if (Get-VM -Name $VmName -ErrorAction SilentlyContinue) { throw "VM already exists: $VmName" }
+$existingNat=Get-NetNat -Name $NatName -ErrorAction SilentlyContinue
+if ($existingNat -and $existingNat.InternalIPInterfaceAddressPrefix -ne $NatPrefix) { throw "NAT $NatName uses another prefix." }
+if (!$existingNat -and @(Get-NetNat -ErrorAction SilentlyContinue).Count -gt 0) { throw 'WinNAT already exists. Reuse its name and prefix before creating a switch or VM.' }
+if (Get-VMNetworkAdapter -All -ErrorAction SilentlyContinue | Where-Object MacAddress -EQ $MacAddress) { throw 'The selected static MAC address is already in use.' }
 if (Test-Path -LiteralPath $RootPath) {
     if (@(Get-ChildItem -LiteralPath $RootPath -Force).Count -gt 0) { throw "RootPath is not empty: $RootPath" }
 } else {
@@ -101,6 +132,7 @@ $nat = Get-NetNat -Name $NatName -ErrorAction SilentlyContinue
 if ($nat) {
     if ($nat.InternalIPInterfaceAddressPrefix -ne $NatPrefix) { throw "NAT $NatName uses another prefix." }
 } else {
+    if (@(Get-NetNat -ErrorAction SilentlyContinue).Count -gt 0) { throw 'WinNAT already exists. Select its existing NAT name and matching prefix; do not create another NAT.' }
     New-NetNat -Name $NatName -InternalIPInterfaceAddressPrefix $NatPrefix | Out-Null
 }
 
@@ -119,5 +151,5 @@ Set-VMFirmware -VMName $VmName -EnableSecureBoot On `
 
 Write-Host "Network: $SwitchName host $HostAddress, NAT $NatName $NatPrefix."
 Write-Host "Created: $VmName (Gen 2, 1 vCPU, $InstallMemoryMB MiB install RAM, 20 GiB VHDX, MAC $MacAddress)."
-Write-Host "Start-VM -Name '$VmName', install Rocky Linux 10 Minimal (IPv4 manual 10.77.0.10/24, gateway $HostAddress)."
+Write-Host "Start-VM -Name '$VmName', install Rocky Linux 10 Minimal (IPv4 manual $VmAddress/$prefixLength, gateway $HostAddress)."
 Write-Host "Power the guest off after installation (do not reboot into the ISO), then run -Phase Finalize and -Phase Route -Persist."

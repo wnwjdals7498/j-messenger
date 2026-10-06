@@ -63,7 +63,19 @@ npm run build --workspace=@j-messenger/desktop
 
 브라우저 시험은 먼저 `npm run build`를 실행하고 설치된 Edge 또는 Chrome이 있는 환경에서 진행한다. Windows 화면 번들과 네이티브 실행 파일은 별도다. 네이티브 빌드는 Rust·Microsoft C++ Build Tools가 준비된 뒤 `npm run bundle --workspace=@j-messenger/desktop`으로 수행한다. 현재 네이티브 바이너리·설치 패키지·앱 프로세스 종료 상태 알림은 검증되지 않았다. [실행 현황](docs/pmt-docs/12-execution-status.md)에 제한과 근거를 기록한다.
 
-VM `j-messenger-lab`의 직접 접속 주소는 **`https://10.77.0.10/`**다. VM의 Nginx443이 웹·API·WSS를 받아 같은 VM 내부 Node3443으로 전달한다. PC의 임시 중계와 이전 로컬 미리보기는 종료했으며 업무 데이터는 VM에 있다. 시험용 CA를 접속하는 사용자에게 신뢰 등록해야 한다. [VM 실행 기록](docs/pmt-docs/13-vm-deployment.md)에 실제 검증·인증서·로그·접속 조건을 기록했다.
+## VM 설정
+
+`npm run setup:vm`에서 **VM 이름·사설IP·HTTP/HTTPS·외부/내부 포트·HTTP redirect·허용CIDR**를 선택한다. 공통 프로필과 검토용 plan·Nginx/env·게스트 스크립트를 생성하며 현재VM을 자동 변경하지 않는다.
+
+```powershell
+npm run setup:vm
+# 저장한 설정으로 반복 생성
+node scripts/setup-vm.mjs --config deploy/vm-profile.example.json --output .tools/vm-setup/my-plan
+```
+
+적용 순서는 **계획 확인 → Hyper-V/OS·IP 준비 → SSH/앱 계정 → TLS → release 배포 → 웹 설정 적용 → 접속 검증**이다. 새 VM 생성은 관리자명령, 앱/웹 적용은 지정게스트명령으로 수행한다. 구체명령과실패복구·인증서신뢰·선택값의 의미는[VM 설정 방법론](docs/pmt-docs/18-vm-setup-guide.md)을 따른다.
+
+현재lab의실측 예시는 `j-messenger-lab`의 **`https://10.77.0.10/`**, VM Nginx443→같은VM Node TLS3443이다. PC 중계없이 업무데이터는VM에 있다. HTTPS 개발CA는신뢰등록이필요하고 HTTP는암호화없는개발시험용이다. [기존VM 실행 기록](docs/pmt-docs/13-vm-deployment.md)과[새설정방법](docs/pmt-docs/18-vm-setup-guide.md)을 구분한다.
 
 Android는 기존 Web 화면을 APK 안에 포함하고 VM의 HTTPS·WSS에 직접 연결한다. Android Studio JDK·SDK와 검증된 공개 lab CA가 준비된 환경에서 다음 명령으로 debug APK를 만들고 지정된 `Pixel_10`에 설치·시험한다. 산출물은 `apps/android/app/build/outputs/apk/debug/app-debug.apk`다. [Android 실행 기록](docs/pmt-docs/14-android-web-app.md)에 조건과 결과를 기록한다.
 
@@ -81,6 +93,7 @@ Android는 기존 Web 화면을 APK 안에 포함하고 VM의 HTTPS·WSS에 직�
 | [구현·환경·통신·결론](docs/pmt-docs/15-implementation-guide.md) | 현재 작업 정리·재현 절차·모듈별 입출력·기술 방식·시험 한계 |
 | [Archify 코드 워크플로우](docs/pmt-docs/16-code-workflows.md) | 수정 가능한 JSON·인터랙티브 HTML·소스 근거·검증 요약 |
 | [이번에 배운 outbox·WSS](docs/pmt-docs/17-outbox-wss-learning.md) | 쉬운 개념·실제 구현·서버/앱 역할·수신과 알림·공식 근거 |
+| [VM 설정 방법론](docs/pmt-docs/18-vm-setup-guide.md) | 이름/IP/HTTP 선택·Hyper-V·게스트·TLS·배포·웹 적용·검증 |
 | [기존 환경](docs/env.md) | 과거 호스트·WSL·VM 실측, 재사용 전 확인 |
 | [기존 검증 기록](docs/verification.md) | 환경 구축 시험 이력 |
 
@@ -88,7 +101,7 @@ Android는 기존 Web 화면을 APK 안에 포함하고 VM의 HTTPS·WSS에 직�
 
 | 검증 | 기록된 결과 |
 | --- | --- |
-| 공통·서버·UI | 128개 시험, 타입·lint·소유 경계·format 통과 |
+| 공통·서버·UI·VM 설정 | 139개 시험(기존128·VM 설정11), 타입·lint·소유 경계 통과 |
 | VM | HTTPS/WSS16개·실제 브라우저, Node service 재부팅 영속1개 통과 |
 | Android Pixel_10 | 실제2개·127.238초: 송수신·복구·IME·회전·Back·TXT32-byte 저장 전체 일치 |
 | 로그 | 마지막 VM910건의 금지 field/시험 원문/비밀번호/drop0, Android app crash0 |

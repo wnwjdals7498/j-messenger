@@ -20,6 +20,9 @@ foreach ($workspace in @('apps/server','apps/web','apps/desktop','packages/contr
 $deployDirectory = Join-Path $payload 'deploy'
 New-Item -ItemType Directory -Path $deployDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'deploy/j-messenger.service') -Destination $deployDirectory
+foreach ($helper in @('vm-profile.mjs','vm-profile.sh')) {
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot ('deploy/' + $helper)) -Destination $deployDirectory
+}
 git -C $repositoryRoot diff --quiet HEAD -- apps/server/src packages/contracts/src packages/client-core/src packages/client-react/src apps/web/src
 $runtimeSourceModified = $LASTEXITCODE -ne 0
 $metadata = [ordered]@{release=$release; sourceCommit=$revision; runtimeSourceModified=$runtimeSourceModified; builtAt=(Get-Date).ToUniversalTime().ToString('o')}

@@ -9,4 +9,5 @@ run(['run', 'build:contracts']);
 run(['run', 'build', '--workspace=@j-messenger/client-core']);
 run(['run', 'build', '--workspace=@j-messenger/client-react']);
 run(['run', 'lint']);
+run(['run', 'test:deploy']);
 for (const name of ['contracts', 'client-core', 'client-react', 'server', 'web', 'desktop']) run(['run', 'check', `--workspace=@j-messenger/${name}`]);
