@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "세션 복원과 재연결의 호출 순서",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "output": "docs/pmt-docs/workflows/session-recovery.html",
+    "repository": {
+      "url": "https://github.com/wnwjdals7498/j-messenger.git",
+      "provider": "github",
+      "revision": "9d13adfe74bb7bd9bf8e468801e4fec378b82760",
+      "link_mode": "web"
+    }
+  },
+  "participants": [
+    {
+      "id": "client",
+      "type": "frontend",
+      "label": "client-core",
+      "sublabel": "메모리 snapshot / cursor",
+      "sources": [
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 378,
+          "end_line": 433
+        },
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 530,
+          "end_line": 594
+        },
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 631,
+          "end_line": 704
+        }
+      ]
+    },
+    {
+      "id": "http",
+      "type": "security",
+      "label": "HTTP / identity",
+      "sublabel": "세션·Origin·계약 검증",
+      "sources": [
+        {
+          "path": "apps/server/src/platform/http/index.ts",
+          "line": 123,
+          "end_line": 185
+        },
+        {
+          "path": "apps/server/src/bootstrap/application.ts",
+          "line": 325,
+          "end_line": 397
+        }
+      ]
+    },
+    {
+      "id": "query",
+      "type": "backend",
+      "label": "대화·메시지 조회",
+      "sublabel": "회원별 snapshot",
+      "sources": [
+        {
+          "path": "apps/server/src/modules/conversations/index.ts",
+          "line": 495,
+          "end_line": 550
+        },
+        {
+          "path": "apps/server/src/modules/messages/index.ts",
+          "line": 574,
+          "end_line": 638
+        }
+      ]
+    },
+    {
+      "id": "realtime",
+      "type": "messagebus",
+      "label": "realtime",
+      "sublabel": "ready / WSS 사건",
+      "sources": [
+        {
+          "path": "apps/server/src/modules/realtime/index.ts",
+          "line": 122,
+          "end_line": 175
+        },
+        {
+          "path": "apps/server/src/modules/realtime/index.ts",
+          "line": 176,
+          "end_line": 262
+        }
+      ]
+    },
+    {
+      "id": "sync",
+      "type": "backend",
+      "label": "sync / eventReader",
+      "sublabel": "서명·epoch·참여 권한",
+      "sources": [
+        {
+          "path": "apps/server/src/modules/sync/index.ts",
+          "line": 68,
+          "end_line": 113
+        },
+        {
+          "path": "apps/server/src/modules/sync/index.ts",
+          "line": 214,
+          "end_line": 290
+        },
+        {
+          "path": "apps/server/src/bootstrap/application.ts",
+          "line": 149,
+          "end_line": 193
+        }
+      ]
+    }
+  ],
+  "messages": [
+    {
+      "id": "me",
+      "from": "client",
+      "to": "http",
+      "y": 160,
+      "label": "GET /me",
+      "variant": "security"
+    },
+    {
+      "id": "me_result",
+      "from": "http",
+      "to": "client",
+      "y": 192,
+      "label": "세션의 user / server",
+      "variant": "return"
+    },
+    {
+      "id": "snapshot_request",
+      "from": "client",
+      "to": "http",
+      "y": 224,
+      "label": "목록·대화별 GET",
+      "variant": "emphasis"
+    },
+    {
+      "id": "query_context",
+      "from": "http",
+      "to": "query",
+      "y": 256,
+      "label": "인증한 RequestContext",
+      "variant": "security"
+    },
+    {
+      "id": "query_return",
+      "from": "query",
+      "to": "http",
+      "y": 288,
+      "label": "snapshot·조회 결과",
+      "variant": "return"
+    },
+    {
+      "id": "snapshot_http",
+      "from": "http",
+      "to": "client",
+      "y": 320,
+      "label": "snapshot·서명 cursor 보존",
+      "variant": "return"
+    },
+    {
+      "id": "connect",
+      "from": "client",
+      "to": "realtime",
+      "y": 352,
+      "label": "인증·Origin 승인 WSS 연결",
+      "variant": "security"
+    },
+    {
+      "id": "ready",
+      "from": "realtime",
+      "to": "client",
+      "y": 384,
+      "label": "ready: cursor / position 상한",
+      "variant": "return"
+    },
+    {
+      "id": "after_through",
+      "from": "client",
+      "to": "http",
+      "y": 416,
+      "label": "GET /sync: after → through",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sync_context",
+      "from": "http",
+      "to": "sync",
+      "y": 448,
+      "label": "인증 문맥·서명 cursor 검증",
+      "variant": "security"
+    },
+    {
+      "id": "pages",
+      "from": "sync",
+      "to": "http",
+      "y": 480,
+      "label": "사건·nextCursor·hasMore",
+      "variant": "return",
+      "note": "hasMore면 같은 through로 다음 페이지 요청"
+    },
+    {
+      "id": "sync_http",
+      "from": "http",
+      "to": "client",
+      "y": 512,
+      "label": "HTTP 응답·buffer 병합",
+      "variant": "return"
+    },
+    {
+      "id": "live_event",
+      "from": "realtime",
+      "to": "client",
+      "y": 544,
+      "label": "sync 중 WSS 사건은 buffer → 완료 후 병합",
+      "variant": "dashed"
+    },
+    {
+      "id": "expired",
+      "from": "http",
+      "to": "client",
+      "y": 576,
+      "label": "410 시 snapshot 재구축; through 있으면 sync 유지",
+      "variant": "security"
+    },
+    {
+      "id": "no_bound",
+      "from": "client",
+      "to": "realtime",
+      "y": 608,
+      "label": "reset 후 상한 없으면 close → ready 재연결",
+      "variant": "dashed"
+    },
+    {
+      "id": "close",
+      "from": "realtime",
+      "to": "client",
+      "y": 640,
+      "label": "close 시 상한·jitter 대기 후 기존 cursor 재연결",
+      "variant": "dashed"
+    },
+    {
+      "id": "unauthorized",
+      "from": "http",
+      "to": "client",
+      "y": 672,
+      "label": "401 시 상태·timer·buffer 정리",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "해석",
+      "items": [
+        "세로 위치는 호출 순서이며 실행 시간 측정값이 아니다.",
+        "조회·sync의 return은 HTTP route를 통해 client에 반환된다.",
+        "snapshot cursor 보존으로 ready 뒤 history 전체 조회를 반복하지 않는다.",
+        "목록 GET 뒤 반환된 각 대화의 메시지 이력을 한 번 받는다."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "분기·병합",
+      "items": [
+        "410·close·401은 해당 조건의 대안 경로이며 항상 순서대로 발생하는 사건이 아니다.",
+        "서명은 server/user/epoch/만료에 묶고 buffer·중복·tombstone을 병합한다.",
+        "클라이언트 cursor는 메모리에 있으며 로그에 저장하지 않는다."
+      ]
+    }
+  ]
+}

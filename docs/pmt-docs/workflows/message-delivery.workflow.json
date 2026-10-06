@@ -1,0 +1,409 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "메시지 저장과 실시간 전달",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/wnwjdals7498/j-messenger.git",
+      "provider": "github",
+      "revision": "9d13adfe74bb7bd9bf8e468801e4fec378b82760",
+      "link_mode": "web"
+    },
+    "output": "docs/pmt-docs/workflows/message-delivery.html",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "클라이언트 화면"
+        },
+        "backend": {
+          "label": "업무·클라이언트 로직"
+        },
+        "database": {
+          "label": "영속 저장"
+        },
+        "security": {
+          "label": "인증·정책"
+        },
+        "messagebus": {
+          "label": "사건·bridge 전송"
+        },
+        "external": {
+          "label": "OS 시스템"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "client",
+      "label": "송신 client-core / 공통 UI"
+    },
+    {
+      "id": "server",
+      "label": "HTTP / messages"
+    },
+    {
+      "id": "durable",
+      "label": "SQLite transaction / realtime"
+    },
+    {
+      "id": "recipient",
+      "label": "수신 client-core"
+    },
+    {
+      "id": "failure",
+      "label": "오류와 재전송",
+      "variant": "exception"
+    }
+  ],
+  "mainPath": [
+    "compose",
+    "pending",
+    "guard",
+    "command",
+    "commit",
+    "scan",
+    "receive"
+  ],
+  "nodes": [
+    {
+      "id": "compose",
+      "lane": "client",
+      "col": 0,
+      "type": "frontend",
+      "label": "메시지 입력",
+      "sublabel": "공통 UI의 제출",
+      "width": 190,
+      "sources": [
+        {
+          "path": "packages/client-react/src/MessengerApp.tsx",
+          "line": 360,
+          "end_line": 399
+        }
+      ]
+    },
+    {
+      "id": "pending",
+      "lane": "client",
+      "col": 1,
+      "type": "backend",
+      "label": "전송 대기 등록",
+      "sublabel": "메모리 · clientMessageId",
+      "width": 190,
+      "sources": [
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 705,
+          "end_line": 731
+        }
+      ]
+    },
+    {
+      "id": "guard",
+      "lane": "server",
+      "col": 1,
+      "type": "security",
+      "label": "HTTP 인증·검증",
+      "sublabel": "Origin / 세션 / 계약",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/server/src/platform/http/index.ts",
+          "line": 123,
+          "end_line": 185
+        }
+      ]
+    },
+    {
+      "id": "command",
+      "lane": "server",
+      "col": 2,
+      "type": "backend",
+      "label": "권한·중복 확인",
+      "sublabel": "members / dedup",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/server/src/modules/messages/index.ts",
+          "line": 426,
+          "end_line": 500
+        }
+      ]
+    },
+    {
+      "id": "commit",
+      "lane": "durable",
+      "col": 3,
+      "type": "database",
+      "label": "메시지·outbox",
+      "sublabel": "같은 transaction commit",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/server/src/modules/messages/index.ts",
+          "line": 501,
+          "end_line": 557
+        },
+        {
+          "path": "apps/server/src/platform/database/index.ts",
+          "line": 152,
+          "end_line": 188
+        }
+      ]
+    },
+    {
+      "id": "reply",
+      "lane": "server",
+      "col": 4,
+      "type": "backend",
+      "label": "HTTP 결과",
+      "sublabel": "새 저장201 / 기존200",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/server/src/modules/messages/index.ts",
+          "line": 495,
+          "end_line": 499
+        },
+        {
+          "path": "apps/server/src/modules/messages/index.ts",
+          "line": 552,
+          "end_line": 556
+        },
+        {
+          "path": "apps/server/src/bootstrap/application.ts",
+          "line": 427,
+          "end_line": 467
+        }
+      ]
+    },
+    {
+      "id": "sender_merge",
+      "lane": "client",
+      "col": 4,
+      "type": "frontend",
+      "label": "송신 결과 병합",
+      "sublabel": "pending 제거 / ID 병합",
+      "width": 190,
+      "sources": [
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 243,
+          "end_line": 260
+        },
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 726,
+          "end_line": 734
+        }
+      ]
+    },
+    {
+      "id": "scan",
+      "lane": "durable",
+      "col": 4,
+      "type": "messagebus",
+      "label": "사건 조회·복원",
+      "sublabel": "commit 후 poll / ACL",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/server/src/modules/realtime/index.ts",
+          "line": 128,
+          "end_line": 175
+        },
+        {
+          "path": "apps/server/src/bootstrap/application.ts",
+          "line": 149,
+          "end_line": 184
+        }
+      ]
+    },
+    {
+      "id": "receive",
+      "lane": "recipient",
+      "col": 5,
+      "type": "frontend",
+      "label": "WSS 수신·병합",
+      "sublabel": "eventId / messageId",
+      "width": 190,
+      "sources": [
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 317,
+          "end_line": 377
+        },
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 543,
+          "end_line": 581
+        }
+      ]
+    },
+    {
+      "id": "retry",
+      "lane": "failure",
+      "col": 1,
+      "type": "messagebus",
+      "label": "일시 실패 재시도",
+      "sublabel": "같은 ID / 제한된 backoff",
+      "width": 190,
+      "sources": [
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 263,
+          "end_line": 306
+        },
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 735,
+          "end_line": 764
+        },
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 766,
+          "end_line": 833
+        }
+      ]
+    },
+    {
+      "id": "reject",
+      "lane": "failure",
+      "col": 2,
+      "type": "security",
+      "label": "거부·실패 표시",
+      "sublabel": "권한 / 입력 / 충돌",
+      "width": 190,
+      "sources": [
+        {
+          "path": "packages/client-core/src/index.ts",
+          "line": 735,
+          "end_line": 764
+        },
+        {
+          "path": "apps/server/src/modules/messages/index.ts",
+          "line": 558,
+          "end_line": 572
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "input_pending",
+      "from": "compose",
+      "to": "pending",
+      "role": "main",
+      "variant": "default"
+    },
+    {
+      "id": "post",
+      "from": "pending",
+      "to": "guard",
+      "role": "main",
+      "variant": "default",
+      "label": "POST"
+    },
+    {
+      "id": "authorized",
+      "from": "guard",
+      "to": "command",
+      "role": "main",
+      "variant": "default",
+      "label": "인증 후"
+    },
+    {
+      "id": "new_commit",
+      "from": "command",
+      "to": "commit",
+      "role": "main",
+      "variant": "default",
+      "label": "새 ID"
+    },
+    {
+      "id": "committed_reply",
+      "from": "commit",
+      "to": "reply",
+      "role": "main",
+      "variant": "default",
+      "label": "commit 후"
+    },
+    {
+      "id": "reuse_reply",
+      "from": "command",
+      "to": "reply",
+      "role": "branch",
+      "variant": "dashed",
+      "label": "동일 요청"
+    },
+    {
+      "id": "response_merge",
+      "from": "reply",
+      "to": "sender_merge",
+      "role": "return",
+      "variant": "emphasis",
+      "label": "응답"
+    },
+    {
+      "id": "durable_scan",
+      "from": "commit",
+      "to": "scan",
+      "role": "async",
+      "variant": "emphasis",
+      "label": "commit 후"
+    },
+    {
+      "id": "stream",
+      "from": "scan",
+      "to": "receive",
+      "role": "async",
+      "variant": "emphasis",
+      "label": "WSS"
+    },
+    {
+      "id": "temporary",
+      "from": "pending",
+      "to": "retry",
+      "role": "error",
+      "variant": "dashed",
+      "label": "일시 실패"
+    },
+    {
+      "id": "resend",
+      "from": "retry",
+      "to": "guard",
+      "role": "branch",
+      "variant": "dashed",
+      "label": "같은 ID"
+    },
+    {
+      "id": "denied",
+      "from": "guard",
+      "to": "reject",
+      "role": "error",
+      "variant": "security",
+      "label": "거부"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "저장 성공의 의미",
+      "items": [
+        "HTTP 성공은 메시지와 outbox commit을 의미한다.",
+        "WSS 전송은 별도 poll 경로이며 재연결은 sync로 누락을 회수한다."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "경계",
+      "items": [
+        "client pending은 메모리이며 앱 종료를 넘는 영속 outbox가 아니다.",
+        "서버가 RequestContext에서 serverId/userId를 결정하고 참여 권한을 확인한다."
+      ]
+    }
+  ]
+}

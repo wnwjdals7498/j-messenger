@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "checkedOn": "2026-10-06",
+  "archify": {
+    "version": "3.0.1",
+    "repository": "https://github.com/tt-a1i/archify",
+    "commit": "2ab3cae7ac2c2a55d7386ca789d03c4fcd31816c"
+  },
+  "codeRepository": {
+    "url": "https://github.com/wnwjdals7498/j-messenger.git",
+    "revision": "9d13adfe74bb7bd9bf8e468801e4fec378b82760"
+  },
+  "scope": "Code diagram verification. Application/VM/device results are separately recorded in 15-implementation-guide.md.",
+  "diagrams": [
+    {
+      "id": "message-delivery",
+      "type": "workflow",
+      "source": {
+        "path": "docs/pmt-docs/workflows/message-delivery.workflow.json",
+        "sha256": "ffc8495865d784119ce2442a84d48b6e98bd1b7467955a1dc0547bbe6dac937c"
+      },
+      "artifact": {
+        "path": "docs/pmt-docs/workflows/message-delivery.html",
+        "sha256": "b027cc66baee926f25a90e48cbdd00f23e150efc11bef162a655eeb45f239c4b",
+        "bytes": 770495
+      },
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "browser": {
+        "engine": "Chrome",
+        "checks": {
+          "containment": "pass",
+          "readability": "pass",
+          "viewerChrome": "pass",
+          "themeStates": "pass",
+          "captures": "pass"
+        },
+        "viewports": [
+          "1440x900 light",
+          "1440x900 dark",
+          "2048x1320 light",
+          "2048x1320 dark"
+        ]
+      },
+      "visualReview": {
+        "status": "reviewed",
+        "inspected": [
+          "1440x900 light"
+        ],
+        "preview": "docs/pmt-docs/workflows/message-delivery.preview.png",
+        "previewSha256": "36e3f974c022c4b9721b4f6dda847e68d2b35d59bf45d3228c6d422f6fef3965"
+      }
+    },
+    {
+      "id": "session-recovery",
+      "type": "sequence",
+      "source": {
+        "path": "docs/pmt-docs/workflows/session-recovery.sequence.json",
+        "sha256": "1d4c62ecad6d9a78b0afcc45c8b81a630e310cfb9c41d4ab2eedee6e5f7a4255"
+      },
+      "artifact": {
+        "path": "docs/pmt-docs/workflows/session-recovery.html",
+        "sha256": "de308d1b440050c01b57d45a4244656097f4bb7f20c5fd1bd22cce1577921483",
+        "bytes": 763292
+      },
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "browser": {
+        "engine": "Chrome",
+        "checks": {
+          "containment": "pass",
+          "readability": "pass",
+          "viewerChrome": "pass",
+          "themeStates": "pass",
+          "captures": "pass"
+        },
+        "viewports": [
+          "1440x900 light",
+          "1440x900 dark",
+          "2048x1320 light",
+          "2048x1320 dark"
+        ]
+      },
+      "visualReview": {
+        "status": "reviewed",
+        "inspected": [
+          "1440x900 light"
+        ],
+        "preview": "docs/pmt-docs/workflows/session-recovery.preview.png",
+        "previewSha256": "250771b6ab622b1c113752a3622f35e540da8b7ca1795d1b948b0a0b89f297d6"
+      }
+    },
+    {
+      "id": "file-round-trip",
+      "type": "workflow",
+      "source": {
+        "path": "docs/pmt-docs/workflows/file-round-trip.workflow.json",
+        "sha256": "b3f1230438eaa841ea915168b4979ffccd3a5503880a457711fc68d016677444"
+      },
+      "artifact": {
+        "path": "docs/pmt-docs/workflows/file-round-trip.html",
+        "sha256": "4ccaeeec1818b3be5c1ebaae6126cabd55aaa44cb918b18c3e2ed20f0c488d56",
+        "bytes": 769587
+      },
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "browser": {
+        "engine": "Chrome",
+        "checks": {
+          "containment": "pass",
+          "readability": "pass",
+          "viewerChrome": "pass",
+          "themeStates": "pass",
+          "captures": "pass"
+        },
+        "viewports": [
+          "1440x900 light",
+          "1440x900 dark",
+          "2048x1320 light",
+          "2048x1320 dark"
+        ]
+      },
+      "visualReview": {
+        "status": "reviewed",
+        "inspected": [
+          "1440x900 light"
+        ],
+        "preview": "docs/pmt-docs/workflows/file-round-trip.preview.png",
+        "previewSha256": "3acb46d188ee4bf9497bd8dad7e6e400678b963646d750d100aec86cceb8c437"
+      }
+    }
+  ]
+}

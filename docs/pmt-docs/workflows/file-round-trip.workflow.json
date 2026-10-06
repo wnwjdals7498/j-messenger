@@ -1,0 +1,395 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "첨부 파일의 업로드와 Android 저장",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/wnwjdals7498/j-messenger.git",
+      "provider": "github",
+      "revision": "9d13adfe74bb7bd9bf8e468801e4fec378b82760",
+      "link_mode": "web"
+    },
+    "output": "docs/pmt-docs/workflows/file-round-trip.html",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "클라이언트 화면"
+        },
+        "backend": {
+          "label": "업무·클라이언트 로직"
+        },
+        "database": {
+          "label": "영속 저장"
+        },
+        "security": {
+          "label": "인증·정책"
+        },
+        "messagebus": {
+          "label": "사건·bridge 전송"
+        },
+        "external": {
+          "label": "OS 시스템"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "client",
+      "label": "Web / Android 입력"
+    },
+    {
+      "id": "server",
+      "label": "VM files / messages"
+    },
+    {
+      "id": "storage",
+      "label": "VM 영속 저장"
+    },
+    {
+      "id": "save",
+      "label": "Android 파일 저장"
+    },
+    {
+      "id": "failure",
+      "label": "취소와 거부",
+      "variant": "exception"
+    }
+  ],
+  "mainPath": [
+    "pick",
+    "upload",
+    "policy",
+    "object",
+    "bind",
+    "download",
+    "bridge",
+    "destination",
+    "saved"
+  ],
+  "nodes": [
+    {
+      "id": "pick",
+      "lane": "client",
+      "col": 0,
+      "type": "frontend",
+      "label": "파일 선택",
+      "sublabel": "Web input / content URI",
+      "width": 190,
+      "sources": [
+        {
+          "path": "packages/client-react/src/MessengerApp.tsx",
+          "line": 417,
+          "end_line": 448
+        },
+        {
+          "path": "apps/android/app/src/main/java/com/jmessenger/android/MainActivity.java",
+          "line": 140,
+          "end_line": 160
+        },
+        {
+          "path": "apps/android/app/src/main/java/com/jmessenger/android/MainActivity.java",
+          "line": 430,
+          "end_line": 482
+        }
+      ]
+    },
+    {
+      "id": "upload",
+      "lane": "client",
+      "col": 1,
+      "type": "backend",
+      "label": "multipart 업로드",
+      "sublabel": "인증한 대화로 전송",
+      "width": 190,
+      "sources": [
+        {
+          "path": "packages/client-react/src/MessengerApp.tsx",
+          "line": 434,
+          "end_line": 445
+        },
+        {
+          "path": "apps/server/src/bootstrap/application.ts",
+          "line": 490,
+          "end_line": 538
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "lane": "server",
+      "col": 1,
+      "type": "security",
+      "label": "권한·용량·형식",
+      "sublabel": "5MB / quota / 여유",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/server/src/modules/files/index.ts",
+          "line": 309,
+          "end_line": 365
+        }
+      ]
+    },
+    {
+      "id": "object",
+      "lane": "storage",
+      "col": 2,
+      "type": "database",
+      "label": "임시→실제 객체",
+      "sublabel": "실제 bytes / sniff / SHA",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/server/src/modules/files/index.ts",
+          "line": 366,
+          "end_line": 410
+        }
+      ]
+    },
+    {
+      "id": "bind",
+      "lane": "server",
+      "col": 3,
+      "type": "backend",
+      "label": "메시지에 연결",
+      "sublabel": "fileId / 같은 transaction",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/server/src/modules/messages/index.ts",
+          "line": 523,
+          "end_line": 540
+        },
+        {
+          "path": "apps/server/src/modules/files/index.ts",
+          "line": 430,
+          "end_line": 467
+        }
+      ]
+    },
+    {
+      "id": "download",
+      "lane": "server",
+      "col": 4,
+      "type": "security",
+      "label": "인증한 다운로드",
+      "sublabel": "회원 / 보존 기간 확인",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/server/src/modules/files/index.ts",
+          "line": 468,
+          "end_line": 514
+        },
+        {
+          "path": "packages/client-react/src/MessengerApp.tsx",
+          "line": 451,
+          "end_line": 470
+        }
+      ]
+    },
+    {
+      "id": "bridge",
+      "lane": "save",
+      "col": 4,
+      "type": "messagebus",
+      "label": "승인 Blob 전달",
+      "sublabel": "origin / main frame 제한",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/web/src/android-files.ts",
+          "line": 75,
+          "end_line": 96
+        },
+        {
+          "path": "apps/android/app/src/main/java/com/jmessenger/android/MainActivity.java",
+          "line": 167,
+          "end_line": 222
+        }
+      ]
+    },
+    {
+      "id": "destination",
+      "lane": "save",
+      "col": 5,
+      "type": "external",
+      "label": "시스템 저장창",
+      "sublabel": "private cache → content URI",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/android/app/src/main/java/com/jmessenger/android/MainActivity.java",
+          "line": 224,
+          "end_line": 320
+        }
+      ]
+    },
+    {
+      "id": "saved",
+      "lane": "client",
+      "col": 5,
+      "type": "frontend",
+      "label": "저장 완료 응답",
+      "sublabel": "request ID / saved",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/android/app/src/main/java/com/jmessenger/android/MainActivity.java",
+          "line": 314,
+          "end_line": 329
+        },
+        {
+          "path": "apps/web/src/android-files.ts",
+          "line": 27,
+          "end_line": 55
+        }
+      ]
+    },
+    {
+      "id": "cancel",
+      "lane": "failure",
+      "col": 5,
+      "type": "security",
+      "label": "취소·실패 처리",
+      "sublabel": "임시 파일 정리 / 오류 code",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/android/app/src/main/java/com/jmessenger/android/MainActivity.java",
+          "line": 260,
+          "end_line": 284
+        },
+        {
+          "path": "apps/android/app/src/main/java/com/jmessenger/android/MainActivity.java",
+          "line": 331,
+          "end_line": 411
+        }
+      ]
+    },
+    {
+      "id": "rejected",
+      "lane": "failure",
+      "col": 1,
+      "type": "security",
+      "label": "업로드 거부",
+      "sublabel": "크기 / 형식 / 권한",
+      "width": 190,
+      "sources": [
+        {
+          "path": "apps/server/src/modules/files/index.ts",
+          "line": 309,
+          "end_line": 335
+        },
+        {
+          "path": "apps/server/src/modules/files/index.ts",
+          "line": 394,
+          "end_line": 399
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "file_input",
+      "from": "pick",
+      "to": "upload",
+      "role": "main",
+      "variant": "default"
+    },
+    {
+      "id": "upload_guard",
+      "from": "upload",
+      "to": "policy",
+      "role": "main",
+      "variant": "default",
+      "label": "POST"
+    },
+    {
+      "id": "write",
+      "from": "policy",
+      "to": "object",
+      "role": "main",
+      "variant": "default",
+      "label": "허용 시"
+    },
+    {
+      "id": "attach",
+      "from": "object",
+      "to": "bind",
+      "role": "main",
+      "variant": "default",
+      "label": "fileId"
+    },
+    {
+      "id": "fetch",
+      "from": "bind",
+      "to": "download",
+      "role": "main",
+      "variant": "default",
+      "label": "GET content"
+    },
+    {
+      "id": "native_blob",
+      "from": "download",
+      "to": "bridge",
+      "role": "main",
+      "variant": "default",
+      "label": "Android"
+    },
+    {
+      "id": "save_picker",
+      "from": "bridge",
+      "to": "destination",
+      "role": "main",
+      "variant": "default",
+      "label": "유효 요청"
+    },
+    {
+      "id": "ack",
+      "from": "destination",
+      "to": "saved",
+      "role": "return",
+      "variant": "emphasis",
+      "label": "복사 완료"
+    },
+    {
+      "id": "save_error",
+      "from": "destination",
+      "to": "cancel",
+      "role": "error",
+      "variant": "dashed",
+      "label": "취소/실패"
+    },
+    {
+      "id": "upload_error",
+      "from": "policy",
+      "to": "rejected",
+      "role": "error",
+      "variant": "security",
+      "label": "거부"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "저장 소유권",
+      "items": [
+        "VM files가 업무 파일 객체를 저장하고 messages가 연결을 확정한다.",
+        "Android는 인증 완료 Blob의 기기 저장만 맡고 자격 증명은 bridge에 전달하지 않는다."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Web·보존 경계",
+      "items": [
+        "일반 Web은 Blob 링크로 저장하며 native bridge는 사용하지 않는다.",
+        "파일 14일과 메시지 본문 5일 보존은 별개이며 이름·내용을 운영 로그에 남기지 않는다."
+      ]
+    }
+  ]
+}

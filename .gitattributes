@@ -1,3 +1,7 @@
 * text=auto eol=lf
 *.png binary
 *.ico binary
+# Keep validated generated HTML byte-for-byte; its upstream whitespace is intentional.
+docs/pmt-docs/workflows/*.html -text whitespace=-blank-at-eol
+docs/pmt-docs/workflows/*.json text eol=lf
+docs/pmt-docs/workflows/*.png binary

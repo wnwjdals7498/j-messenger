@@ -16,3 +16,8 @@ data/
 apps/android/.gradle/
 apps/android/**/build/
 apps/android/local.properties
+docs/pmt-docs/workflows/.archify-*/
+docs/pmt-docs/workflows/*.delivery.json
+docs/pmt-docs/workflows/*.finalize.json
+docs/pmt-docs/workflows/*.finalize-summary.json
+docs/pmt-docs/workflows/*.browser-check.json

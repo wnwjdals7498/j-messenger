@@ -27,6 +27,8 @@
 | 최신 실행 범위·구현 상태 | [실행 현황](docs/pmt-docs/12-execution-status.md) |
 | 실제 VM 배포·TLS·journal·접속 | [VM 실행 기록](docs/pmt-docs/13-vm-deployment.md) |
 | Android Web APK·Pixel10 검증 | [Android 실행 기록](docs/pmt-docs/14-android-web-app.md) |
+| 실제 구현·시험 환경 재현·모듈 통신·결론 | [구현 정리](docs/pmt-docs/15-implementation-guide.md) |
+| 커밋된 코드의 호출·저장·복구 흐름 | [Archify 워크플로우](docs/pmt-docs/16-code-workflows.md) |
 
 ## 반드시 지킬 경계
 

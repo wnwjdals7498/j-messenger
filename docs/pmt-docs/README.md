@@ -20,6 +20,8 @@
 | [12 실행 범위·상태](12-execution-status.md) | 최신 사용자 조건·현재 구현/검증·제외 범위 |
 | [13 VM 실행 기록](13-vm-deployment.md) | 실제 배포·TLS·journal·재부팅 검증·접속 주소·남은 조건 |
 | [14 Android 웹 앱](14-android-web-app.md) | Web APK 패키징·앱 전용 TLS·Pixel10 검증·빌드와 범위 |
+| [15 구현·시험 정리](15-implementation-guide.md) | 실제 작업·환경 구축·모듈 통신·기술 방식·시험 결과·결론 |
+| [16 코드 워크플로우](16-code-workflows.md) | Archify의 소스 기반 HTML/JSON·호출·저장·재연결·파일 경로 |
 
 규칙 우선순위: 현재 사용자 지시 → [AGENTS.md](../../AGENTS.md) → 이 참조 문서 → 작업별 명세. 기술 사실의 근거는 공식 문서만 사용한다. 외부 문서는 기술 검증 자료이며 프로젝트 요구사항을 임의로 바꾸는 근거가 아니다.
 
