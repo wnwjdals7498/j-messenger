@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "J 메신저",
+  "version": "0.2.0",
+  "identifier": "private.j-messenger.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev:web --workspace=@j-messenger/desktop",
+    "devUrl": "http://127.0.0.1:5174",
+    "beforeBuildCommand": "npm run build --workspace=@j-messenger/desktop",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "J 메신저",
+        "width": 1120,
+        "height": 760,
+        "minWidth": 360,
+        "minHeight": 520,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: asset:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": { "active": false }
+}

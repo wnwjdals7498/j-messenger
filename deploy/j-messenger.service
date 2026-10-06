@@ -1,0 +1,17 @@
+[Unit]
+Description=J Messenger
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/app/current
+EnvironmentFile=%h/.config/j-messenger/server.env
+ExecStart=/usr/bin/node apps/server/dist/main.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

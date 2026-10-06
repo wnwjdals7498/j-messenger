@@ -1,65 +1,51 @@
-# j-messenger agent rules
+# j-messenger 작업 기준
 
-These rules apply to every request in this repository. They override global agent rules where they differ.
+기존 메일 계정으로 같은 메일 서버 사용자끼리 대화하는 사설망 메신저다. 답변과 문서는 한국어로 간결하게 작성한다. 기술 정보는 공식 문서·공식 저장소에서만 확인한다.
 
-## 1. First action of every request (mandatory)
+## 작업 시작
 
-1. If the skill `ctx-relay` is in your available skills, load it **before anything else**, even for a short request. Then follow its Executor loop.
-2. If the skill is not available, follow the ctx-relay block at the end of this file. It is the same loop.
-3. Run `python .ctx/ctx.py check` (Windows). If `python` is missing, use `python3`.
-4. This repository uses ctx-relay instead of any `handoff` skill. Do not create `.opencode/state/`. `.ctx/STATE.md` is the only state file.
+1. 사용자 요청과 `git status`를 확인하고 기존 변경을 보존한다.
+2. [설계 목차](docs/pmt-docs/README.md)와 아래 표에서 이번 작업에 필요한 문서를 읽는다.
+3. `proj-mgmt-tool-v2`로 프로젝트 `j-messenger`를 재개하고 범위·완료 기준을 정한 Item을 시작한다. PMT 문서 루트는 `D:/workspace/test-space/github/docs`이며 상태는 그 아래 `projects/j-messenger/`에 있다. 같은 작업에서는 session을 고정한다.
+4. 새 구조는 목표 설계다. 실제 파일·의존성·명령이 만들어졌는지 확인한 뒤 사용한다.
 
-## 2. Keep going, never ask
+## 참조 문서
 
-- All decisions are already made in `docs/plan.md` and the task specs. Do not ask the user questions and do not wait for confirmation.
-- Per task: implement, run `node scripts/verify.mjs T<n>`, and when it prints `VERIFY T<n> OK`: mark `[x]`, append the LOG line,
-  then **commit**: `git add <the task's files> .ctx` and `git commit -m "T<n>: <task title>"`. Then take the next `- [ ]` task in the same reply.
-- `verify.mjs` fails when anything outside the task's `files:` differs from the last commit. If it names files of the previous task,
-  that task was not committed: commit it. Never edit other files to make verify pass.
-- The only reasons to stop: every task is done, `status: blocked`, or the ctx-relay blocked rule fires (unclear `do:`, a needed file outside
-  `files:`, or `fails` reaches 2). Write the cause in STATE `blocked:` so the planner can fix it.
-- Reply to the user in Korean. Per finished task, one line: task id, verify result, commit hash.
-
-## 3. Environment (details in docs/env.md)
-
-- Windows 11, PowerShell. Repo root `D:\workspace\test-space\github\j-messenger`. Run every command from the repo root.
-- Node 24 on Windows; the server also runs on Node 22 on the VM, so use nothing newer than Node 22 offers.
-  `.ts` files run directly with Node's type stripping. Do not add ts-node, tsx, Babel or build steps.
-- **Write and edit files only with your file edit/patch tool.** Never write file content through PowerShell
-  (`Set-Content`, `Out-File`, `>`, here-strings): PowerShell turns backticks into control characters and breaks files.
-- Ports: 5173 web dev server, 3000 server. Port 3001 is the model gateway: never bind, kill or call it.
-- No `sudo`, no `ssh`, no changes to Windows, WSL, Hyper-V or the VM. Infrastructure belongs to the planner.
-
-## 4. Planner-owned files (never edit)
-
-`AGENTS.md`, `docs/**`, `scripts/**`, `.gitignore`, `.gitattributes`, `web/src/types.ts`, and in Impl tasks every file under `web/test/` and `server/test/`.
-If one of them looks wrong, set the task blocked and explain why.
-
-## 5. Code rules
-
-- Follow the "Common rules" at the top of the current spec file (`docs/tasks/web-fix.md` with `docs/tasks/web.md`, or `docs/tasks/server.md`).
-- TypeScript strict, ES modules. Local imports end in `.ts`. Type-only imports use `import type`.
-- Only erasable TypeScript: no `enum`, `namespace`, constructor parameter properties or decorators. No `any` in `src/`.
-- Never add dependencies. Never run `npm install <package>`. Only `npm --prefix web install` / `npm --prefix server install` with the committed package.json.
-- No test-only hooks in `src/` (no `__get...` functions, no exports that only tests use).
-- UI text is Korean exactly as the spec writes it. Code, comments, commit messages and `.ctx` files are English.
-
-## 6. Where things are
-
-| What | Where |
+| 작업 | 기준 |
 | --- | --- |
-| Current tasks and state | `.ctx/TASKS.md`, `.ctx/STATE.md` |
-| Spec of the current tasks | `docs/tasks/web-fix.md` (T32-T41), `docs/tasks/server.md` (T42-T73); read only your `## T<n>` section and Common rules |
-| Decisions | `docs/plan.md` |
-| Environment, ports, accounts | `docs/env.md` |
+| 범위·우선순위·완료 판정 | [요구사항](docs/pmt-docs/01-requirements.md) |
+| 폴더·프레임워크·의존 방향 | [구조와 기술](docs/pmt-docs/02-architecture.md) |
+| 기능 분리·데이터 소유·확장 | [모듈](docs/pmt-docs/03-modules.md) |
+| API·이벤트·인증·동작 예제 | [통신과 동작](docs/pmt-docs/04-communication.md) |
+| 구현·테스트·의존성 추가 | [코드 규칙](docs/pmt-docs/05-code-rules.md) |
+| 로그·보존·배포·백업·복구 | [운영](docs/pmt-docs/06-operations.md) |
+| 재구축 순서·구 자산 처리 | [전환 계획](docs/pmt-docs/07-rebuild-plan.md) |
+| 기술 사실 확인 | [공식 근거](docs/pmt-docs/08-official-references.md) |
+| 구현할 기능·선행 조건 | [기능 목록](docs/pmt-docs/09-feature-list.md) |
+| 기능별 입출력·Test·로깅 확인 | [기능 명세서](docs/pmt-docs/10-feature-specifications.md) |
+| 행동 기반 구현 범위·6-luna 병렬 실행 | [상세계획](docs/pmt-docs/11-implementation-plan.md) |
+| 최신 실행 범위·구현 상태 | [실행 현황](docs/pmt-docs/12-execution-status.md) |
 
-<!-- ctx-relay:start -->
-## ctx-relay (do this before every task)
-Work state lives in `.ctx/`. You remember nothing from earlier turns; these files are the only truth. Load skill `ctx-relay` if you can.
-1. Run `python .ctx/ctx.py check` (`python3` if `python` is missing). Then read `.ctx/STATE.md` and `.ctx/TASKS.md`.
-2. `status: blocked` -> report the `blocked:` line and stop. `status: idle` -> take the first `- [ ]` task: set `task`, `status: active`, `fails: 0`.
-3. Edit or create only the paths in the task's `files:`. Unclear `do:` or another file needed -> set blocked. Do not guess.
-4. After every edit or command, rewrite STATE `did`, `next`, `updated`, then run check. Always do this before ending a reply.
-5. Run the task's `verify:`. Exit 0 -> mark `- [x]`, append a LOG.md line, STATE `task: -`, `status: idle`. Otherwise `fails` +1; at 2 -> mark `- [!]`, `status: blocked`, `blocked: <cause>`, stop.
-6. Never mark `[x]` without exit 0 from `verify:` in this session. Never edit `do:`, `files:` or `verify:`. Never push.
-<!-- ctx-relay:end -->
+## 반드시 지킬 경계
+
+- 서버는 기능별 모듈을 가진 단일 프로세스로 시작한다. 모듈 간 공개 인터페이스만 호출하며 상대 내부 파일·테이블을 직접 다루지 않는다.
+- 계약은 `packages/contracts`, 클라이언트 공통 동작은 `client-core`, 공통 화면은 `client-react`가 소유한다. framework·DB·OS 세부 구현은 어댑터 안에 둔다.
+- 모든 사용자 데이터는 `serverId`로 격리한다. 서버가 세션에서 사용자·서버를 결정하고 대화 참여·관리자 권한을 검사한다.
+- 메시지와 outbox는 같은 트랜잭션으로 저장한다. 전송은 commit 후, 재시도는 같은 clientMessageId, 재연결은 cursor sync로 복구한다.
+- 메시지 본문·파일·비밀번호·토큰은 운영 로그에 남기지 않는다. 로그·감사·업무 데이터의 보존 정책을 구분한다.
+- 메일 인증 정보·관리자 확인·파일 정책·종료 알림의 미확정 조건은 [U01~U04](docs/pmt-docs/01-requirements.md)를 따른다. 모의 시험을 실제 통합 성공으로 보고하지 않는다.
+
+## 변경과 검증
+
+- TypeScript strict·ESM, UTF-8·LF, 파일 편집 도구를 사용한다. 구체 규칙과 검증 명령은 코드 규칙을 따른다.
+- 기능 변경은 계약·소유 모듈·migration·관련 시험·참조 문서를 함께 맞춘다. 새 의존성은 목적과 공식 호환 근거를 남긴다.
+- 테스트는 동작·권한·실패 복구를 확인한다. assertion 약화·skip으로 통과시키지 않는다. 문서만 바꾸면 링크·일관성·변경 범위를 검사한다.
+- PMT `note`·`verify`·`end`로 실제 결과와 검증 한계를 기록한다. 범위 밖 구현이나 다음 배치를 자동으로 계속하지 않는다.
+- 병렬 구현은 상세계획의 소유권·계약 동결·선행·통합 게이트를 따른다. 인계는 목적·행동·입출력 의미·시험·로그·완료 증거로 작성하며 파일 편집 지시만으로 대신하지 않는다. 서브에이전트는 자기 책임만 구현하고 PMT·공유 계약·lock·migration 순번·bootstrap은 오케스트레이터가 통합한다.
+- 사용자 변경 삭제, 자동 stash·reset, 요청 없는 push·배포를 하지 않는다. 3001 포트는 사용·종료·호출하지 않는다. 호스트·VM 변경은 해당 작업 범위에서만 수행한다.
+
+## 이전 문서의 지위
+
+이 파일은 2026-10-02에 전면 교체했다. `docs/plan.md`, `docs/tasks/`, `.ctx/`, `scripts/verify.mjs T<n>`는 구 설계 이력이며 현재 작업 큐가 아니다. ctx-relay 자동 실행, planner 전용 파일 금지, 테스트 수정 일괄 금지, 자동 연쇄 커밋 규칙은 적용하지 않는다.
+
+현재 사용자 지시 → 이 파일 → `docs/pmt-docs/` → 작업별 명세 순서로 따른다. 기존 `docs/env.md`·`docs/vm-runbook.md`는 과거 환경 기록이므로 실제 상태를 재확인한다.

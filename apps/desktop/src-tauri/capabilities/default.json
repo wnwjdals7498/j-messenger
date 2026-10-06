@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "J Messenger main window; native filesystem operations stay in Rust dialogs.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

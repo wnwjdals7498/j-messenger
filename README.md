@@ -1,26 +1,37 @@
 # j-messenger
 
-> 상태: VM 환경 구축·연결 검증 완료(2026-09-23). 웹 UI 데모 배치(T1~T31)가 OpenCode 실행 대기 중.
+메일 서버 계정으로 인증하고 같은 메일 서버 사용자끼리 개인·단체 대화하는 사설망 메신저다. Web을 먼저 구현하고 파일·읽음·보존 정책, Windows·Android로 확장한다.
 
-관리포털과 독립된 Node 메신저 학습 프로젝트다. 중앙 서버는 Rocky Linux 10 VM에 두고, Windows·Android·Web 클라이언트를 대상으로 한다. 실제 서비스 접근은 허용된 사설망으로 제한한다.
+**2026-10-06: 재구축 구현·통합 검증 진행 중.** 새 서버·웹은 `apps/`와 `packages/`에서 실행한다. 기존 `web/`는 비교용 이력이다. 메일 서버가 없어 실제 메일 연동 시험은 제외했고, 현재 대상은 Web·Windows다.
 
-## 계획한 범위
+## 로컬 실행
 
-- 사용자가 입력한 메일 서버 주소와 계정으로 인증하고, 같은 메일 서버의 사용자끼리만 대화한다.
-- 개인·단체 대화, 파일 전송, 읽음 상태를 세 클라이언트에서 제공한다.
-- 메일 서버 관리자가 메시지·파일 보존 기간을 정하고 만료 자료를 삭제한다.
-- Android·Windows는 앱 프로세스가 종료된 상태에도 새 메시지 알림을 받도록 목표를 둔다. Web 알림은 제외한다.
-- 외부 푸시 중계 없이 추가 서비스 비용이 들지 않는 방식을 우선 검토한다. 이 조건으로 종료 상태 알림을 충족할 수 없으면 구현 직전에 방식을 다시 결정한다.
+Node 22.18 이상이 필요하다. 저장소 루트에서 다음 순서로 실행한다.
 
-## 문서
+```powershell
+npm ci
+npm run build
+npm start
+```
+
+브라우저에서 `http://127.0.0.1:3000`을 연다. 현재 개발 인증 계정은 서버 `dev-a`의 `alice`·`bob`·`carol`, 서버 `dev-b`의 `mallory`다. 개발 암호는 `dev-only`다. 운영 인증이나 실제 메일 인증 성공을 의미하지 않는다.
+
+메시지 본문은 5일, 첨부는 14일 보존한다. 첨부는 개당 5MB, 개발용 합계 한도는 서버별 2GB다. 실제 VM의 용량을 확인하기 전에는 이 한도를 운영 실측값으로 보지 않는다. 실행 데이터는 Git에서 제외한 `data/`에 저장한다.
+
+```powershell
+npm run check
+npm run test:e2e
+npm run build --workspace=@j-messenger/desktop
+```
+
+브라우저 시험은 먼저 `npm run build`를 실행하고 설치된 Edge 또는 Chrome이 있는 환경에서 진행한다. Windows 화면 번들과 네이티브 실행 파일은 별도다. 네이티브 빌드는 Rust·Microsoft C++ Build Tools가 준비된 뒤 `npm run bundle --workspace=@j-messenger/desktop`으로 수행한다. 현재 네이티브 바이너리·설치 패키지·VM 배포·앱 프로세스 종료 상태 알림은 검증되지 않았다. [실행 현황](docs/pmt-docs/12-execution-status.md)에 제한과 근거를 기록한다.
 
 | 문서 | 내용 |
 | --- | --- |
-| [AGENTS.md](AGENTS.md) | OpenCode(작은 모델) 작업 규칙. ctx-relay 스킬을 매 요청 처음에 불러옴 |
-| [docs/plan.md](docs/plan.md) | 목표, 결정 기록, 배치 순서, planner 절차 |
-| [docs/tasks/web.md](docs/tasks/web.md) | 웹 배치 T1~T31 상세 명세 |
-| [docs/env.md](docs/env.md) | 호스트·WSL·VM 환경, 포트, 계정, 연결 방법과 실측 결과 |
-| [docs/vm-runbook.md](docs/vm-runbook.md) | VM을 처음부터 다시 만드는 절차 |
-| [docs/verification.md](docs/verification.md) | 환경·통합 검증 기록 |
+| [AGENTS.md](AGENTS.md) | 현재 작업 규칙과 필수 경계 |
+| [재구축 설계](docs/pmt-docs/README.md) | 요구사항, 폴더·기술, 모듈, 통신, 확장, 코드·운영 기준 |
+| [전환 계획](docs/pmt-docs/07-rebuild-plan.md) | 단계별 산출물·검증·기존 자산 처리 |
+| [기존 환경](docs/env.md) | 과거 호스트·WSL·VM 실측, 재사용 전 확인 |
+| [기존 검증 기록](docs/verification.md) | 환경 구축 시험 이력 |
 
-OpenCode 실행: WSL에서 저장소 루트로 이동해 `opencode`를 실행하고 `다음 작업 진행`을 입력한다. 메일 서버 제품과 실제 인증 방법, 앱 종료 상태 알림 방식은 아직 확정되지 않았다(plan.md P01).
+이전 `docs/plan.md`, `docs/tasks/`, `.ctx/`는 이력으로 보존한다. 다음 작업은 현재 설계와 PMT 완료 기준에 따라 정하며, 이전 T번호 작업을 자동 재개하지 않는다.

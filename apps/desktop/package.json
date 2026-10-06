@@ -1,0 +1,29 @@
+{
+  "name": "@j-messenger/desktop",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "npm run typecheck",
+    "dev": "tauri dev",
+    "dev:web": "vite --host 127.0.0.1 --port 5174 --strictPort",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "bundle": "tauri build"
+  },
+  "dependencies": {
+    "@j-messenger/contracts": "0.2.0",
+    "@j-messenger/client-core": "0.2.0",
+    "@j-messenger/client-react": "0.2.0",
+    "@tauri-apps/api": "2.12.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "vite": "7.3.6",
+    "@vitejs/plugin-react": "5.2.0",
+    "@tauri-apps/cli": "2.12.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
+  }
+}

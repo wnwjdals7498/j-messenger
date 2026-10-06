@@ -6,3 +6,10 @@ dist/
 *.env
 !*.env.example
 .agents/
+.npm-cache/
+coverage/
+test-results/
+playwright-report/
+data/
+.tools/
+*.log

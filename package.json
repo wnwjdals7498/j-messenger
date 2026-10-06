@@ -1,0 +1,34 @@
+{
+  "name": "j-messenger",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "engines": { "node": ">=22.18.0" },
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "check:contracts": "npm run check --workspace=@j-messenger/contracts",
+    "build:contracts": "npm run build --workspace=@j-messenger/contracts",
+    "check:foundation": "npm run typecheck:foundation --workspace=@j-messenger/server && npm run test:foundation --workspace=@j-messenger/server",
+    "check:server": "npm run check --workspace=@j-messenger/server",
+    "check:client": "npm run check --workspace=@j-messenger/client-core",
+    "check:ui": "npm run check --workspace=@j-messenger/client-react",
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
+    "check": "node scripts/check-workspace.mjs",
+    "build": "node scripts/build-workspace.mjs",
+    "dev:server": "npm run build && node scripts/dev-server.mjs",
+    "start": "npm run start --workspace=@j-messenger/server",
+    "dev:web": "npm run dev --workspace=@j-messenger/web",
+    "lint": "eslint apps packages && node scripts/check-boundaries.mjs",
+    "format:check": "prettier --check apps packages tsconfig.base.json"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.0",
+    "vite": "7.3.6",
+    "eslint": "10.11.0",
+    "typescript-eslint": "8.71.0",
+    "prettier": "3.9.9",
+    "@playwright/test": "1.63.0"
+  }
+}

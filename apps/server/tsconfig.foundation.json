@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.test.json",
+  "include": [
+    "src/platform/config/**/*.ts",
+    "src/platform/logging/**/*.ts",
+    "test/platform/config.test.ts",
+    "test/platform/logging.test.ts"
+  ]
+}

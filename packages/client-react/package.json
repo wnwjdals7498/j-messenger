@@ -1,0 +1,32 @@
+{
+  "name": "@j-messenger/client-react",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node ../../scripts/copy-package-assets.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run --root .",
+    "check": "npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "@j-messenger/contracts": "0.2.0",
+    "@j-messenger/client-core": "0.2.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "happy-dom": "20.14.5",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/user-event": "14.6.7"
+  }
+}
