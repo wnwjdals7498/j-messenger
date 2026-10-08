@@ -140,6 +140,21 @@ export function createHttpServer(options: HttpOptions): FastifyInstance {
     const protectedRoute = policy === 'authRequired' || policy === 'native';
     const authorizationValid =
       bearer !== undefined && /^Bearer [^\s]+$/.test(bearer);
+    if (options.config.authMode === 'j-auth' && protectedRoute) {
+      const query = request.query;
+      const hasQueryCredential =
+        typeof query === 'object' &&
+        query !== null &&
+        Object.keys(query).some((key) =>
+          /(?:token|jwt|credential|session|authorization|^auth$)/iu.test(key),
+        );
+      if (
+        !authorizationValid ||
+        request.headers.cookie !== undefined ||
+        hasQueryCredential
+      )
+        throw new DomainError('unauthorized');
+    }
     if (bearerPresented && !authorizationValid)
       throw new DomainError('unauthorized');
     if (cookiePresented && bearerPresented)

@@ -21,7 +21,9 @@ const ctx: RequestContext = {
   requestId: '123e4567-e89b-42d3-a456-426614174000',
   authenticatedAt: '2026-10-02T00:00:00.000Z',
 };
-function fixture() {
+function fixture(
+  authMode: 'development-fixed' | 'j-auth' = 'development-fixed',
+) {
   let calls = 0;
   let handlers = 0;
   const events: unknown[] = [];
@@ -44,6 +46,13 @@ function fixture() {
     config: loadConfig({
       NODE_ENV: 'test',
       PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
+      ...(authMode === 'j-auth'
+        ? {
+            AUTH_MODE: 'j-auth',
+            JAUTH_TENANT: 'tenant-test',
+            KC_PUBLIC_URL: 'https://kc.jgw.test',
+          }
+        : {}),
     }),
     resolver,
     logger,
@@ -105,6 +114,12 @@ function fixture() {
       url: '/public/login',
       config: routeConfig('public'),
       handler: async () => ({ data: true }),
+    });
+    routes.route({
+      method: 'GET',
+      url: '/health/live',
+      config: routeConfig('public'),
+      handler: async () => ({ data: { live: true } }),
     });
     routes.route({
       method: 'POST',
@@ -264,6 +279,42 @@ describe('HTTP boundary', () => {
     await f.app.close();
   });
 
+  it('requires a bearer token for j-auth protected HTTP and leaves public health available', async () => {
+    const f = fixture('j-auth');
+    const cookieOnly = await f.app.inject({
+      method: 'GET',
+      url: '/private/1',
+      headers: { cookie: 'jm_session=legacy-session' },
+    });
+    const mixed = await f.app.inject({
+      method: 'GET',
+      url: '/private/1',
+      headers: {
+        authorization: 'Bearer token',
+        cookie: 'jm_session=legacy-session',
+      },
+    });
+    const queryToken = await f.app.inject({
+      method: 'GET',
+      url: '/private/1?access_token=token',
+      headers: { authorization: 'Bearer token' },
+    });
+    const validBearer = await f.app.inject({
+      method: 'GET',
+      url: '/private/1',
+      headers: { authorization: 'Bearer valid' },
+    });
+    const health = await f.app.inject({ method: 'GET', url: '/health/live' });
+    expect(cookieOnly.statusCode).toBe(401);
+    expect(mixed.statusCode).toBe(401);
+    expect(queryToken.statusCode).toBe(401);
+    expect(validBearer.statusCode).toBe(200);
+    expect(health.statusCode).toBe(200);
+    expect(f.calls).toBe(1);
+    expect(f.handlers).toBe(1);
+    await f.app.close();
+  });
+
   it('permits native bearer WebSocket without Origin and requires exact Origin for cookie WebSocket', async () => {
     const f = fixture();
     await f.app.ready();
@@ -286,6 +337,29 @@ describe('HTTP boundary', () => {
     expect(f.calls).toBe(2);
     native.close();
     bearer.close();
+  });
+
+  it('applies j-auth bearer-only proof to protected WebSocket handshakes', async () => {
+    const f = fixture('j-auth');
+    await f.app.ready();
+    await expect(
+      f.app.injectWS('/bearer-socket', {
+        headers: { cookie: 'jm_session=legacy-session' },
+      }),
+    ).rejects.toThrow('401');
+    await expect(
+      f.app.injectWS('/bearer-socket?token=secret', {
+        headers: { authorization: 'Bearer token' },
+      }),
+    ).rejects.toThrow('401');
+    const bearer = await f.app.injectWS('/bearer-socket', {
+      headers: { authorization: 'Bearer token' },
+    });
+    bearer.terminate();
+    expect(f.calls).toBe(1);
+    expect(f.handlers).toBe(1);
+    bearer.close();
+    await f.app.close();
   });
 
   it('requires Origin for browser login, allows native session issuance, and rejects extra body fields', async () => {

@@ -1,6 +1,6 @@
 # j-messenger 제품군 연결 기능 명세
 
-작성일: 2026-10-08. 상태: **연결 기능 구현·인수 시험 전**. [연결 목록](suite-integration-features.md), [제품군 결정](../../j-groupware/docs/decisions.md), [공통 기준](../../j-groupware/docs/suite-feature-specifications.md)을 따른다. 기존 [메신저 명세](pmt-docs/10-feature-specifications.md)와 [실행 현황](pmt-docs/12-execution-status.md)을 보존한다. 기존 구현 완료와 이번 연결 완료는 구별한다.
+작성일: 2026-10-08. 상태: **M1 backend·실제 Keycloak HTTP/WSS 검증 완료; M5/M2/M3/M4 및 전체 인수 미완료**. [연결 목록](suite-integration-features.md), [제품군 결정](../../j-groupware/docs/decisions.md), [공통 기준](../../j-groupware/docs/suite-feature-specifications.md)을 따른다. 기존 [메신저 명세](pmt-docs/10-feature-specifications.md)와 [실행 현황](pmt-docs/12-execution-status.md)을 보존한다. 기존 구현 완료와 이번 연결 완료는 구별한다.
 
 ## 입력·출력·연결 경계
 
@@ -40,3 +40,7 @@
 ## 확정 관문
 
 M1에서 j-auth 모드의 HTTP/WSS 인증 어댑터와 공개/진단 route 예외를 명시한다. M2에서 BFF 중계 path·client 버전·CSS 변수명을 고정한다. M5에서 기존 SQLite 자료 이관 필요 여부와 rollback 범위를 확인하며 기존 자료를 시험용으로 덮지 않는다. 대화 상대는 한 번 이상 메신저를 쓴 회원이라는 기존 한계와 development-fixed 시험 모드·mail 모드를 유지한다. 조직도 연결·알림 송신은 이후 범위다.
+
+## M1 클라우드 구현 증거
+
+[고정 인증/tenant/문맥 계약과 실행 결과](cloud-j-auth-verification-2026-10-08.md)를 따른다. 기존 mail/development-fixed·SQLite와 standalone 앱 소스를 보존했다. MS-02~04는 실제 두 realm/회원의 HTTP/WSS로 확인했고, SQLite 기반 두 회원 메시지와 cursor 복구·BFF relay 종료도 확인했다. PostgreSQL 기반 MS-T01, client/화면 MS-T03, 고객 VM MS-T04의 완료는 별도다.

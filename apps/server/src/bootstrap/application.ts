@@ -36,6 +36,7 @@ import type {
   Uuid,
 } from '@j-messenger/contracts';
 import type { AppConfig } from '../platform/config/index.js';
+import type { TokenVerifier } from '@j-auth/token-verifier';
 import { createLogger } from '../platform/logging/index.js';
 import { createDatabase } from '../platform/database/index.js';
 import { JobStore, createJobRunner } from '../platform/jobs/index.js';
@@ -60,6 +61,8 @@ export interface ApplicationOptions {
   readonly clock?: Clock;
   readonly logger?: FeatureLog;
   readonly maintenance?: boolean;
+  readonly tokenVerifier?: TokenVerifier;
+  readonly authFetch?: typeof globalThis.fetch;
 }
 export async function createApplication(
   config: AppConfig,
@@ -95,6 +98,10 @@ export async function createApplication(
       clock,
       idFactory: ids,
       logger,
+      ...(options.tokenVerifier
+        ? { tokenVerifier: options.tokenVerifier }
+        : {}),
+      ...(options.authFetch ? { fetch: options.authFetch } : {}),
     });
     const conversations = createConversationService({
       db,
@@ -257,51 +264,24 @@ export async function createApplication(
         (_request, reply) =>
           reply.code(closing ? 503 : 200).send({ data: { ready: !closing } }),
       );
-      scope.get(
-        '/api/v1/servers',
-        {
-          config: routeConfig('public'),
-          schema: { response: { 200: ServerListResponseSchema } },
-        },
-        () => ({ data: identity.listServers() }),
-      );
-      scope.post<{
-        Body: { serverId: string; username: string; password: string };
-      }>(
-        '/api/v1/session',
-        {
-          config: routeConfig('public'),
-          schema: {
-            body: SessionCreateRequestSchema,
-            response: { 201: CurrentUserResponseSchema },
+      if (config.authMode !== 'j-auth') {
+        scope.get(
+          '/api/v1/servers',
+          {
+            config: routeConfig('public'),
+            schema: { response: { 200: ServerListResponseSchema } },
           },
-        },
-        async (request, reply) => {
-          const result = await identity.login(
-            request.body.serverId,
-            request.body.username,
-            request.body.password,
-          );
-          reply.setCookie('jm_session', result.credential, {
-            httpOnly: true,
-            secure: config.secureCookies || config.tls !== null,
-            sameSite: 'strict',
-            path: '/',
-            maxAge: config.sessionDays * 86400,
-          });
-          return reply.code(201).send({ data: result.user });
-        },
-      );
-      if (config.features.nativeSessions)
+          () => ({ data: identity.listServers() }),
+        );
         scope.post<{
           Body: { serverId: string; username: string; password: string };
         }>(
-          '/api/v1/native/session',
+          '/api/v1/session',
           {
-            config: routeConfig('public', { credentialSubmission: 'native' }),
+            config: routeConfig('public'),
             schema: {
               body: SessionCreateRequestSchema,
-              response: { 201: NativeSessionResponseSchema },
+              response: { 201: CurrentUserResponseSchema },
             },
           },
           async (request, reply) => {
@@ -309,17 +289,46 @@ export async function createApplication(
               request.body.serverId,
               request.body.username,
               request.body.password,
-              'native',
             );
-            return reply.code(201).send({
-              data: {
-                user: result.user,
-                credential: result.credential,
-                expiresAt: result.expiresAt,
-              },
+            reply.setCookie('jm_session', result.credential, {
+              httpOnly: true,
+              secure: config.secureCookies || config.tls !== null,
+              sameSite: 'strict',
+              path: '/',
+              maxAge: config.sessionDays * 86400,
             });
+            return reply.code(201).send({ data: result.user });
           },
         );
+        if (config.features.nativeSessions)
+          scope.post<{
+            Body: { serverId: string; username: string; password: string };
+          }>(
+            '/api/v1/native/session',
+            {
+              config: routeConfig('public', { credentialSubmission: 'native' }),
+              schema: {
+                body: SessionCreateRequestSchema,
+                response: { 201: NativeSessionResponseSchema },
+              },
+            },
+            async (request, reply) => {
+              const result = await identity.login(
+                request.body.serverId,
+                request.body.username,
+                request.body.password,
+                'native',
+              );
+              return reply.code(201).send({
+                data: {
+                  user: result.user,
+                  credential: result.credential,
+                  expiresAt: result.expiresAt,
+                },
+              });
+            },
+          );
+      }
       scope.get(
         '/api/v1/me',
         {
@@ -330,15 +339,16 @@ export async function createApplication(
           data: await identity.get(requireContext(request)),
         }),
       );
-      scope.delete(
-        '/api/v1/session',
-        { config: protectedConfig },
-        async (request, reply) => {
-          await identity.logout(requireContext(request));
-          reply.clearCookie('jm_session', { path: '/' });
-          return { data: { loggedOut: true } };
-        },
-      );
+      if (config.authMode !== 'j-auth')
+        scope.delete(
+          '/api/v1/session',
+          { config: protectedConfig },
+          async (request, reply) => {
+            await identity.logout(requireContext(request));
+            reply.clearCookie('jm_session', { path: '/' });
+            return { data: { loggedOut: true } };
+          },
+        );
       scope.get<{ Querystring: { cursor?: string; limit?: number } }>(
         '/api/v1/users',
         {

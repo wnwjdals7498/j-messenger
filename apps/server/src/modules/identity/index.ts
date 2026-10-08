@@ -5,6 +5,11 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import { DomainError } from '@j-messenger/contracts';
+import {
+  createTokenVerifier,
+  TokenVerificationError,
+} from '@j-auth/token-verifier';
+import type { TokenVerifier } from '@j-auth/token-verifier';
 import type { AppConfig } from '../../platform/config/index.js';
 import type { Database } from '../../platform/database/index.js';
 import type {
@@ -40,6 +45,8 @@ export interface IdentityOptions {
   readonly idFactory: IdFactory;
   readonly logger?: FeatureLog;
   readonly authenticator?: MailAuthenticator;
+  readonly tokenVerifier?: TokenVerifier;
+  readonly fetch?: typeof globalThis.fetch;
   readonly tokenBytes?: () => Uint8Array;
   readonly serverAliases?: Readonly<Record<string, readonly string[]>>;
 }
@@ -88,6 +95,13 @@ interface SessionRow {
   username: string;
   display_name: string;
   expires_at: string;
+}
+interface JAuthSession {
+  readonly expiresAt: number;
+  readonly subject: string;
+  readonly serverId: RequestContext['serverId'];
+  readonly userId: RequestContext['userId'];
+  readonly sessionId: RequestContext['sessionId'];
 }
 const SESSION_TOKEN_BYTES = 32;
 const safeEmit = (
@@ -172,12 +186,35 @@ export async function createIdentityService(
     config.sessionDays > 7
   )
     throw new IdentityError('internal');
-  const servers: MailServer[] = config.mailServers.map((server) => ({
-    id: server.id,
-    host: server.host,
-    port: server.port,
-    secure: server.secure,
-  }));
+  const jAuthMode = config.authMode === 'j-auth';
+  const jAuthConfig = jAuthMode ? config.jAuth : undefined;
+  const tokenVerifier = jAuthMode
+    ? (options.tokenVerifier ??
+      (jAuthConfig
+        ? createTokenVerifier({
+            publicUrl: jAuthConfig.keycloakOrigin,
+            ...(options.fetch ? { fetch: options.fetch } : {}),
+          })
+        : undefined))
+    : undefined;
+  if (jAuthMode && (!jAuthConfig || !tokenVerifier))
+    throw new IdentityError('unavailable');
+  const servers: MailServer[] =
+    jAuthMode && jAuthConfig
+      ? [
+          {
+            id: jAuthConfig.tenantId,
+            host: '',
+            port: 0,
+            secure: true,
+          },
+        ]
+      : config.mailServers.map((server) => ({
+          id: server.id,
+          host: server.host,
+          port: server.port,
+          secure: server.secure,
+        }));
   const serverBySelector = new Map<string, MailServer>();
   for (const server of servers) {
     for (const selector of [
@@ -198,6 +235,8 @@ export async function createIdentityService(
         'INSERT INTO mail_servers(id,name) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name',
       ).run(server.id, server.id);
   });
+  const jAuthSessions = new WeakMap<RequestContext, JAuthSession>();
+  let nextJAuthSessionId = 0n;
   const cursorKey = config.cursorSigningKey;
   const featuresFor = (row: {
     id: unknown;
@@ -221,6 +260,22 @@ export async function createIdentityService(
             stableNow(clock).toISOString(),
           ) as SessionRow | undefined)
       : undefined;
+  const jAuthSession = (context: RequestContext): JAuthSession | undefined => {
+    const session = jAuthSessions.get(context);
+    if (
+      !session ||
+      context.serverId !== session.serverId ||
+      context.userId !== session.userId ||
+      context.sessionId !== session.sessionId ||
+      context.serverId !== jAuthConfig?.tenantId ||
+      !validDecimal(context.sessionId) ||
+      !validDecimal(context.userId) ||
+      !Number.isFinite(session.expiresAt) ||
+      session.expiresAt <= stableNow(clock).getTime()
+    )
+      return undefined;
+    return session;
+  };
   const userById = (
     serverId: string,
     userId: string,
@@ -258,6 +313,135 @@ export async function createIdentityService(
     return password === 'dev-only' && displayName
       ? { canonicalUsername: username, displayName }
       : null;
+  };
+  const resolveJAuth = async (input: {
+    credential: string;
+    requestId: Uuid;
+  }): Promise<RequestContext> => {
+    if (!jAuthConfig || !tokenVerifier) throw new IdentityError('unavailable');
+    let identity: Awaited<ReturnType<TokenVerifier['verify']>>;
+    try {
+      identity = await tokenVerifier.verify(input.credential, {
+        tenantId: jAuthConfig.tenantId,
+        audience: 'j-messenger',
+      });
+    } catch (error) {
+      if (error instanceof TokenVerificationError) {
+        safeEmit(
+          options.logger,
+          'F03',
+          'identity.session.checked',
+          error.kind === 'invalid' ? 'rejected' : 'failure',
+          input.requestId,
+          {
+            reasonCode:
+              error.kind === 'invalid' ? 'unauthorized' : 'unavailable',
+          },
+        );
+        throw new IdentityError(
+          error.kind === 'invalid' ? 'unauthorized' : 'unavailable',
+        );
+      }
+      safeEmit(
+        options.logger,
+        'F03',
+        'identity.session.checked',
+        'failure',
+        input.requestId,
+        { reasonCode: 'unavailable' },
+      );
+      throw new IdentityError('unavailable');
+    }
+    const audience = identity.claims['aud'];
+    if (
+      audience !== 'j-messenger' &&
+      !(
+        Array.isArray(audience) &&
+        audience.length === 1 &&
+        audience[0] === 'j-messenger'
+      )
+    )
+      throw new IdentityError('unauthorized');
+    if (!identity.roles.includes('messenger:use')) {
+      safeEmit(
+        options.logger,
+        'F03',
+        'identity.session.checked',
+        'rejected',
+        input.requestId,
+        { reasonCode: 'forbidden' },
+      );
+      throw new IdentityError('forbidden');
+    }
+    const username = identity.claims['preferred_username'];
+    const candidateName = identity.claims['name'];
+    const displayName =
+      typeof candidateName === 'string' ? candidateName : username;
+    if (
+      typeof username !== 'string' ||
+      username.length < 1 ||
+      username.length > 256 ||
+      username.trim().length === 0 ||
+      /[\u0000-\u001f\u007f\u0080-\u009f]/u.test(username) ||
+      typeof displayName !== 'string' ||
+      displayName.length < 1 ||
+      displayName.length > 128 ||
+      /[\u0000-\u001f\u007f\u0080-\u009f]/u.test(displayName) ||
+      displayName.trim().length === 0
+    )
+      throw new IdentityError('unauthorized');
+
+    const now = stableNow(clock);
+    const tokenExpiry = identity.claims.exp;
+    if (
+      typeof tokenExpiry !== 'number' ||
+      !Number.isSafeInteger(tokenExpiry) ||
+      tokenExpiry * 1000 <= now.getTime()
+    )
+      throw new IdentityError('unauthorized');
+    let user:
+      { id: bigint; server_id: string; display_name: string } | undefined;
+    try {
+      user = await db.run(() => {
+        db.prepare(
+          `INSERT INTO users(server_id,username,display_name,created_at) VALUES(?,?,?,?)
+          ON CONFLICT(server_id,username) DO UPDATE SET display_name=excluded.display_name`,
+        ).run(jAuthConfig.tenantId, username, displayName, now.toISOString());
+        return db
+          .prepare(
+            'SELECT id,server_id,display_name FROM users WHERE server_id=? AND username=?',
+          )
+          .get(jAuthConfig.tenantId, username) as
+          { id: bigint; server_id: string; display_name: string } | undefined;
+      });
+    } catch {
+      throw new IdentityError('unavailable');
+    }
+    if (!user) throw new IdentityError('unavailable');
+    const sessionId = (++nextJAuthSessionId).toString();
+    const context: RequestContext = Object.freeze({
+      serverId: jAuthConfig.tenantId as RequestContext['serverId'],
+      userId: decimal(user.id) as RequestContext['userId'],
+      sessionId: sessionId as RequestContext['sessionId'],
+      requestId: input.requestId,
+      authenticatedAt: now.toISOString(),
+    });
+    jAuthSessions.set(context, {
+      expiresAt: Math.min(tokenExpiry * 1000, now.getTime() + 5 * 60_000),
+      subject: identity.subject,
+      serverId: context.serverId,
+      userId: context.userId,
+      sessionId: context.sessionId,
+    });
+    safeEmit(
+      options.logger,
+      'F03',
+      'identity.session.checked',
+      'success',
+      input.requestId,
+      { serverId: context.serverId, userId: context.userId },
+    );
+    return context;
   };
   return {
     listServers() {
@@ -309,6 +493,7 @@ export async function createIdentityService(
       password: string,
       kind: 'cookie' | 'native' = 'cookie',
     ) {
+      if (jAuthMode) throw new IdentityError('forbidden');
       const server = serverBySelector.get(serverId);
       if (!server) throw new IdentityError('not_found');
       if (
@@ -419,6 +604,7 @@ export async function createIdentityService(
       }
     },
     async resolve(input: { credential: string; requestId: Uuid }) {
+      if (jAuthMode) return resolveJAuth(input);
       if (
         !validUuid(input.requestId) ||
         typeof input.credential !== 'string' ||
@@ -471,12 +657,19 @@ export async function createIdentityService(
       return context;
     },
     async get(context: RequestContext) {
+      if (jAuthMode) {
+        if (!jAuthSession(context)) throw new IdentityError('unauthorized');
+        const user = userById(context.serverId, context.userId);
+        if (!user) throw new IdentityError('unauthorized');
+        return featuresFor(user);
+      }
       if (!sessionRow(context)) throw new IdentityError('unauthorized');
       const user = userById(context.serverId, context.userId);
       if (!user) throw new IdentityError('unauthorized');
       return featuresFor(user);
     },
     logout(context: RequestContext) {
+      if (jAuthMode) return Promise.reject(new IdentityError('forbidden'));
       if (
         !validDecimal(context.sessionId) ||
         !validDecimal(context.userId) ||
@@ -513,6 +706,7 @@ export async function createIdentityService(
       });
     },
     sessionActive(context: RequestContext) {
+      if (jAuthMode) return Boolean(jAuthSession(context));
       return Boolean(sessionRow(context));
     },
     async requireSameServer(context: RequestContext, userId: string) {

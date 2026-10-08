@@ -2,7 +2,7 @@ import path from 'node:path';
 import { DomainError } from '@j-messenger/contracts';
 
 export type RuntimeMode = 'development' | 'test' | 'production';
-export type AuthMode = 'mail' | 'development-fixed';
+export type AuthMode = 'mail' | 'development-fixed' | 'j-auth';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 export type ConfigKey =
   | 'NODE_ENV'
@@ -12,6 +12,8 @@ export type ConfigKey =
   | 'PATHS'
   | 'DB_PATH'
   | 'AUTH_MODE'
+  | 'JAUTH_TENANT'
+  | 'KC_PUBLIC_URL'
   | 'SESSION_DAYS'
   | 'SECURE_COOKIES'
   | 'CURSOR_SIGNING_KEY'
@@ -45,6 +47,7 @@ export interface AppConfig {
   readonly backupRoot: string;
   readonly tls: Readonly<{ certPath: string; keyPath: string }> | null;
   readonly authMode: AuthMode;
+  readonly jAuth?: Readonly<{ tenantId: string; keycloakOrigin: string }>;
   readonly sessionDays: number;
   readonly secureCookies: boolean;
   readonly cursorSigningKey: string;
@@ -143,10 +146,40 @@ export function loadConfig(
   const authMode =
     env['AUTH_MODE'] ??
     (typedMode === 'production' ? 'mail' : 'development-fixed');
-  if (authMode !== 'mail' && authMode !== 'development-fixed')
+  if (!['mail', 'development-fixed', 'j-auth'].includes(authMode))
     return fail('AUTH_MODE');
   if (typedMode === 'production' && authMode === 'development-fixed')
     return fail('AUTH_MODE');
+  let jAuth: AppConfig['jAuth'];
+  if (authMode === 'j-auth') {
+    if (!['127.0.0.1', 'localhost'].includes(host)) return fail('HOST');
+    const tenantId = env['JAUTH_TENANT'];
+    if (
+      !tenantId ||
+      !/^[a-z][a-z0-9-]{2,30}$/.test(tenantId) ||
+      tenantId === 'operator'
+    )
+      return fail('JAUTH_TENANT');
+    let keycloak: URL;
+    try {
+      keycloak = new URL(env['KC_PUBLIC_URL'] ?? '');
+    } catch {
+      return fail('KC_PUBLIC_URL');
+    }
+    if (
+      keycloak.protocol !== 'https:' ||
+      !keycloak.hostname.endsWith('.jgw.test') ||
+      keycloak.port === '3001' ||
+      keycloak.username ||
+      keycloak.password ||
+      keycloak.search ||
+      keycloak.hash ||
+      keycloak.pathname !== '/'
+    )
+      return fail('KC_PUBLIC_URL');
+    jAuth = Object.freeze({ tenantId, keycloakOrigin: keycloak.origin });
+    if (port === 3001 || origin.port === '3001') return fail('PORT');
+  }
   const secureCookies = bool(
     env['SECURE_COOKIES'],
     typedMode === 'production',
@@ -223,7 +256,7 @@ export function loadConfig(
           keyPath: absolute(key, key, 'TLS_KEY_PATH'),
         })
       : null;
-  if (typedMode === 'production' && !env['MAIL_ADAPTER'])
+  if (typedMode === 'production' && authMode === 'mail' && !env['MAIL_ADAPTER'])
     return fail('MAIL_ADAPTER');
 
   const level = env['LOG_LEVEL'] ?? 'info';
@@ -243,7 +276,7 @@ export function loadConfig(
     new Set(serverNames).size !== serverNames.length
   )
     return fail('MAIL_SERVERS');
-  const mailServers = serverNames.map((id) => ({
+  const mailServers = (jAuth ? [jAuth.tenantId] : serverNames).map((id) => ({
     id,
     tenantId: id,
     host: `${id}.invalid`,
@@ -271,11 +304,13 @@ export function loadConfig(
       false,
       'FEATURE_NOTIFICATIONS',
     ),
-    nativeSessions: bool(
-      env['FEATURE_NATIVE_SESSIONS'],
-      typedMode === 'development',
-      'FEATURES',
-    ),
+    nativeSessions:
+      authMode !== 'j-auth' &&
+      bool(
+        env['FEATURE_NATIVE_SESSIONS'],
+        typedMode === 'development',
+        'FEATURES',
+      ),
   });
   if (features.notifications) return fail('FEATURE_NOTIFICATIONS');
   const fileQuotaBytes = integer(
@@ -294,7 +329,8 @@ export function loadConfig(
     publicOrigin,
     ...paths,
     tls,
-    authMode,
+    authMode: authMode as AuthMode,
+    ...(jAuth ? { jAuth } : {}),
     sessionDays: integer(env['SESSION_DAYS'], 7, 1, 7, 'SESSION_DAYS'),
     secureCookies,
     cursorSigningKey,

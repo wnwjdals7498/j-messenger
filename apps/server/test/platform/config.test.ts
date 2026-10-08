@@ -16,6 +16,50 @@ afterEach(() => {
 });
 
 describe('loadConfig', () => {
+  it('requires a fixed customer tenant and HTTPS Keycloak origin for j-auth without mail or native login', () => {
+    const env = {
+      AUTH_MODE: 'j-auth',
+      JAUTH_TENANT: 'sample-a',
+      KC_PUBLIC_URL: 'https://auth.jgw.test',
+    };
+    const config = loadConfig(env, baseDir());
+    expect(config.jAuth).toEqual({
+      tenantId: 'sample-a',
+      keycloakOrigin: 'https://auth.jgw.test',
+    });
+    expect(config.features.nativeSessions).toBe(false);
+    expect(Object.isFrozen(config.jAuth)).toBe(true);
+    for (const changed of [
+      { JAUTH_TENANT: '' },
+      { JAUTH_TENANT: 'operator' },
+      { JAUTH_TENANT: '../sample-a' },
+      { KC_PUBLIC_URL: 'http://auth.jgw.test' },
+      { KC_PUBLIC_URL: 'https://outside.test' },
+      { KC_PUBLIC_URL: 'https://auth.jgw.test:3001' },
+      { KC_PUBLIC_URL: 'https://auth.jgw.test/realms/test' },
+      { KC_PUBLIC_URL: 'https://auth.jgw.test?secret=hidden' },
+      { PORT: '3001' },
+      { HOST: '0.0.0.0' },
+    ])
+      expect(() => loadConfig({ ...env, ...changed }, baseDir())).toThrow(
+        ConfigError,
+      );
+    const base = baseDir();
+    expect(
+      loadConfig(
+        {
+          ...env,
+          NODE_ENV: 'production',
+          DB_PATH: path.join(base, 'db.sqlite'),
+          PUBLIC_ORIGIN: 'https://messenger.jgw.test',
+          TLS_CERT_PATH: path.join(base, 'server.crt'),
+          TLS_KEY_PATH: path.join(base, 'server.key'),
+          CURSOR_SIGNING_KEY: 'x'.repeat(32),
+        },
+        base,
+      ).authMode,
+    ).toBe('j-auth');
+  });
   it('returns immutable development defaults and independent retention periods', () => {
     const config = loadConfig({}, baseDir());
     expect(config.mode).toBe('development');

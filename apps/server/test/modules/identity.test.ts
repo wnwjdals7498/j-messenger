@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createSign, generateKeyPairSync } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,10 @@ import { loadConfig } from '../../src/platform/config/index.js';
 import { createDatabase } from '../../src/platform/database/index.js';
 import type { Database } from '../../src/platform/database/index.js';
 import { createLogger } from '../../src/platform/logging/index.js';
+import {
+  createTokenVerifier,
+  TokenVerificationError,
+} from '@j-auth/token-verifier';
 import { MIGRATIONS } from '../../src/bootstrap/migrations.js';
 import {
   createIdentityService,
@@ -44,6 +48,37 @@ const newConfig = (base: string) =>
     },
     base,
   );
+
+const tenantId = 'tenant-test';
+const keycloakOrigin = 'https://identity.example.test';
+const localKeyPair = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const localTokenVerifier = createTokenVerifier({
+  publicUrl: keycloakOrigin,
+  keyResolver: async () => localKeyPair.publicKey,
+});
+function signedIdentityToken(
+  claims: Record<string, unknown> = {
+    sub: 'subject-is-not-the-user-key',
+    preferred_username: 'messenger-user',
+    name: 'Messenger User',
+    tenant: tenantId,
+    azp: 'j-groupware',
+    typ: 'Bearer',
+    iss: `${keycloakOrigin}/realms/tenant-${tenantId}`,
+    aud: 'j-messenger',
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    resource_access: { 'j-messenger': { roles: ['messenger:use'] } },
+  },
+): string {
+  const encode = (value: unknown) =>
+    Buffer.from(JSON.stringify(value)).toString('base64url');
+  const unsigned = `${encode({ alg: 'RS256', typ: 'JWT' })}.${encode(claims)}`;
+  const signer = createSign('RSA-SHA256');
+  signer.update(unsigned);
+  signer.end();
+  return `${unsigned}.${signer.sign(localKeyPair.privateKey).toString('base64url')}`;
+}
 
 describe('identity module', () => {
   let dir: string;
@@ -326,5 +361,180 @@ describe('identity module', () => {
     ])
       expect(output).not.toContain(secret);
     expect(output).not.toContain('logging.entry.dropped');
+  });
+
+  it('verifies signed j-auth JWTs before registering the preferred username and keeps session state in memory', async () => {
+    const records: Readonly<Record<string, unknown>>[] = [];
+    const logger = createLogger({
+      release: 'test',
+      module: 'server',
+      level: 'debug',
+      sink: (record) => records.push(record),
+    });
+    const config = {
+      ...newConfig(dir),
+      authMode: 'j-auth' as const,
+      jAuth: { tenantId, keycloakOrigin },
+    };
+    identity = await createIdentityService({
+      db,
+      config,
+      clock,
+      idFactory: ids,
+      logger,
+      tokenVerifier: localTokenVerifier,
+    });
+
+    const token = signedIdentityToken();
+    const context = await identity.resolve({
+      credential: token,
+      requestId: ids.uuid(),
+    });
+    expect(context.serverId).toBe(tenantId);
+    expect(context.userId).toBe('1');
+    expect(db.prepare('SELECT username FROM users').get()).toEqual({
+      username: 'messenger-user',
+    });
+    expect(db.prepare('SELECT count(*) AS n FROM sessions').get()!.n).toBe(0n);
+    expect(identity.sessionActive(context)).toBe(true);
+    expect(identity.sessionActive({ ...context })).toBe(false);
+    expect(await identity.get(context)).toMatchObject({
+      id: '1',
+      serverId: tenantId,
+      displayName: 'Messenger User',
+    });
+    const sameUsername = await identity.resolve({
+      credential: signedIdentityToken({
+        sub: 'a-different-subject',
+        preferred_username: 'messenger-user',
+        name: 'Messenger User Updated',
+        tenant: tenantId,
+        azp: 'j-groupware',
+        typ: 'Bearer',
+        iss: `${keycloakOrigin}/realms/tenant-${tenantId}`,
+        aud: 'j-messenger',
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        resource_access: { 'j-messenger': { roles: ['messenger:use'] } },
+      }),
+      requestId: ids.uuid(),
+    });
+    expect(sameUsername.userId).toBe(context.userId);
+    expect(db.prepare('SELECT count(*) AS n FROM users').get()!.n).toBe(1n);
+    const singleAudienceArray = await identity.resolve({
+      credential: signedIdentityToken({
+        sub: 'single-array-audience-subject',
+        preferred_username: 'messenger-user',
+        name: 'Messenger User',
+        tenant: tenantId,
+        azp: 'j-groupware',
+        typ: 'Bearer',
+        iss: `${keycloakOrigin}/realms/tenant-${tenantId}`,
+        aud: ['j-messenger'],
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        resource_access: { 'j-messenger': { roles: ['messenger:use'] } },
+      }),
+      requestId: ids.uuid(),
+    });
+    expect(singleAudienceArray.userId).toBe(context.userId);
+    await expect(
+      identity.login(tenantId, 'messenger-user', 'pw'),
+    ).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+    await expect(identity.logout(context)).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+    expect(db.prepare('SELECT count(*) AS n FROM sessions').get()!.n).toBe(0n);
+
+    const denied = signedIdentityToken({
+      sub: 'different-subject',
+      preferred_username: 'no-role-user',
+      name: 'No Role User',
+      tenant: tenantId,
+      azp: 'j-groupware',
+      typ: 'Bearer',
+      iss: `${keycloakOrigin}/realms/tenant-${tenantId}`,
+      aud: 'j-messenger',
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+    await expect(
+      identity.resolve({ credential: denied, requestId: ids.uuid() }),
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    expect(db.prepare('SELECT count(*) AS n FROM users').get()!.n).toBe(1n);
+    await expect(
+      identity.resolve({ credential: 'not-a-jwt', requestId: ids.uuid() }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+    const claims = {
+      sub: 'unsafe-subject',
+      name: 'Unsafe User',
+      tenant: tenantId,
+      azp: 'j-groupware',
+      typ: 'Bearer',
+      iss: `${keycloakOrigin}/realms/tenant-${tenantId}`,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      resource_access: { 'j-messenger': { roles: ['messenger:use'] } },
+    };
+    const multipleAudiences = signedIdentityToken({
+      ...claims,
+      preferred_username: 'multi-audience',
+      aud: ['j-messenger', 'j-groupware'],
+    });
+    await expect(
+      identity.resolve({
+        credential: multipleAudiences,
+        requestId: ids.uuid(),
+      }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+    for (const preferredUsername of [
+      'unsafe\nuser',
+      '   ',
+      'unsafe\u0085user',
+    ]) {
+      const unsafeName = signedIdentityToken({
+        ...claims,
+        preferred_username: preferredUsername,
+        aud: 'j-messenger',
+      });
+      await expect(
+        identity.resolve({ credential: unsafeName, requestId: ids.uuid() }),
+      ).rejects.toMatchObject({ code: 'unauthorized' });
+    }
+    expect(db.prepare('SELECT count(*) AS n FROM users').get()!.n).toBe(1n);
+    expect(JSON.stringify(records)).not.toContain(token);
+    expect(JSON.stringify(records)).not.toContain('unsafe\nuser');
+
+    clock.advance(5 * 60_000 + 1);
+    expect(identity.sessionActive(context)).toBe(false);
+    await expect(identity.get(context)).rejects.toMatchObject({
+      code: 'unauthorized',
+    });
+  });
+
+  it('maps verifier outages to unavailable without creating a user or session', async () => {
+    const config = {
+      ...newConfig(dir),
+      authMode: 'j-auth' as const,
+      jAuth: { tenantId, keycloakOrigin },
+    };
+    identity = await createIdentityService({
+      db,
+      config,
+      clock,
+      idFactory: ids,
+      tokenVerifier: {
+        async verify() {
+          throw new TokenVerificationError('unavailable');
+        },
+      },
+    });
+    await expect(
+      identity.resolve({ credential: 'opaque', requestId: ids.uuid() }),
+    ).rejects.toMatchObject({ code: 'unavailable' });
+    expect(db.prepare('SELECT count(*) AS n FROM users').get()!.n).toBe(0n);
+    expect(db.prepare('SELECT count(*) AS n FROM sessions').get()!.n).toBe(0n);
   });
 });

@@ -53,3 +53,7 @@
 ## 의존성 근거
 
 공식 npm registry metadata 및 [공식 Fastify TypeBox provider](https://github.com/fastify/fastify-type-provider-typebox)의 호환표를 확인했다. TypeBox 1.3.34·provider 6.1.0, Fastify 5 계열을 선택하며 실제 설치·검증 결과로 고정한다. TypeScript 5.9.3·Vitest 4.1.0은 Node 22/24 호환 환경에서 검증한다. package/lock·공유 설정은 부모가 단일 writer로 통합한다.
+
+## 2026-10-08 제품군 M1 클라우드 후속
+
+[실제 j-auth 인증 연결 기록](../cloud-j-auth-verification-2026-10-08.md)을 추가했다. MS-02~04 backend와 actual Keycloak HTTP/WSS를 검증했고 기존 mail/development-fixed 동작과 SQLite 데이터를 보존했다. M5 PostgreSQL·M2 client/BFF 업무 HTTP/UI·M3 전체 통합·M4 VM은 완료로 표시하지 않는다. 이번 클라우드에는 Windows PMT 상태/도구가 없어 그 기록만 미실행이고 저장소 증거를 유지했다.
