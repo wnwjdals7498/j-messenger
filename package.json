@@ -11,6 +11,9 @@
     "packages/*"
   ],
   "scripts": {
+    "build:suite": "node deploy/build-suite-profile.mjs build",
+    "package:suite": "node deploy/build-suite-profile.mjs package",
+    "test:suite-profile": "node --test tests/deploy/suite-profile.test.mjs",
     "check:contracts": "npm run check --workspace=@j-messenger/contracts",
     "build:contracts": "npm run build --workspace=@j-messenger/contracts",
     "check:foundation": "npm run typecheck:foundation --workspace=@j-messenger/server && npm run test:foundation --workspace=@j-messenger/server",

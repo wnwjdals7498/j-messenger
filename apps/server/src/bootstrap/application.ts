@@ -626,15 +626,17 @@ export async function createApplication(
         );
       }
       realtime.registerRoutes(scope);
-      scope.addHook('onRoute', (route) => {
-        if (!route.url.startsWith('/api/'))
-          route.config = { ...route.config, ...routeConfig('public') };
-      });
-      scope.register(staticFiles, {
-        root: config.webDist,
-        prefix: '/',
-        index: 'index.html',
-      });
+      if (config.authMode !== 'j-auth') {
+        scope.addHook('onRoute', (route) => {
+          if (!route.url.startsWith('/api/'))
+            route.config = { ...route.config, ...routeConfig('public') };
+        });
+        scope.register(staticFiles, {
+          root: config.webDist,
+          prefix: '/',
+          index: 'index.html',
+        });
+      }
     });
     await app.ready();
     let timer: ReturnType<typeof setInterval> | undefined;

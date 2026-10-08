@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "profile": "j-groupware-internal-messenger",
+  "purpose": "Internal Messenger API/BFF backend bundle; no standalone client application",
+  "buildWorkspaces": ["@j-messenger/contracts", "@j-messenger/server"],
+  "includedPaths": [
+    "apps/server/package.json",
+    "apps/server/dist/**",
+    "packages/contracts/package.json",
+    "packages/contracts/dist/**",
+    "deploy/postgres-migrations/**",
+    "deploy/j-messenger.service",
+    "deploy/suite-profile.json",
+    "package.json"
+  ],
+  "excludedWorkspaces": [
+    "apps/web",
+    "apps/desktop",
+    "apps/android",
+    "packages/client-core",
+    "packages/client-react"
+  ],
+  "runtime": {
+    "authMode": "j-auth",
+    "databaseDriver": "postgres",
+    "entrypoint": "node apps/server/dist/main.js",
+    "install": "npm install --omit=dev --ignore-scripts --no-audit --no-fund",
+    "webDist": "Unused in this profile: j-auth mode does not register standalone UI routes."
+  }
+}
