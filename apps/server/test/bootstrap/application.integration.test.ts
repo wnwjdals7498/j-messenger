@@ -9,6 +9,8 @@ import type { Clock, Uuid } from '@j-messenger/contracts';
 import { loadConfig } from '../../src/platform/config/index.js';
 import { createLogger } from '../../src/platform/logging/index.js';
 import { createApplication } from '../../src/bootstrap/application.js';
+import { randomUUID } from 'node:crypto';
+import { Pool } from 'pg';
 
 const socketInbox = new WeakMap<
   WebSocket,
@@ -61,6 +63,7 @@ describe('application bootstrap integration', () => {
   let clock: TestClock;
   let app: Awaited<ReturnType<typeof createApplication>>;
   let logger: ReturnType<typeof createLogger>;
+  let postgresSchema: string;
   const logs: Readonly<Record<string, unknown>>[] = [];
   const origin = () => `http://127.0.0.1:${port}`;
   const reservePort = async () =>
@@ -85,6 +88,13 @@ describe('application bootstrap integration', () => {
         HOST: '127.0.0.1',
         PORT: String(port),
         PUBLIC_ORIGIN: origin(),
+        ...(process.env['JMS_TEST_DATABASE_URL']
+          ? {
+              DATABASE_DRIVER: 'postgres',
+              DATABASE_URL: process.env['JMS_TEST_DATABASE_URL'],
+              DATABASE_SCHEMA: postgresSchema,
+            }
+          : {}),
       },
       root,
     );
@@ -126,6 +136,7 @@ describe('application bootstrap integration', () => {
     root = await mkdtemp(path.join(tmpdir(), 'jm-app-integration-'));
     port = await reservePort();
     clock = new TestClock();
+    postgresSchema = `test_ms_${randomUUID().replaceAll('-', '')}`;
     logs.length = 0;
     logger = createLogger({
       release: 'integration-test',
@@ -138,13 +149,23 @@ describe('application bootstrap integration', () => {
   });
   afterEach(async () => {
     if (app) await app.close();
+    if (process.env['JMS_TEST_DATABASE_URL']) {
+      const pool = new Pool({
+        connectionString: process.env['JMS_TEST_DATABASE_URL'],
+      });
+      try {
+        await pool.query(`DROP SCHEMA "${postgresSchema}" CASCADE`);
+      } finally {
+        await pool.end();
+      }
+    }
     expect(
       logs.some((record) => record.event === 'logging.entry.dropped'),
     ).toBe(false);
     await rm(root, { recursive: true, force: true });
   });
 
-  it('uses real HTTP routes and SQLite for identity, server isolation, message dedup, receipts, and opaque sync cursors', async () => {
+  it('uses the selected real store for HTTP identity, server isolation, message dedup, receipts, and opaque sync cursors', async () => {
     const alice = await login('alice');
     const bob = await login('bob');
     const mallory = await request(alice.cookie, 'POST', '/api/v1/session', {
@@ -401,11 +422,11 @@ describe('application bootstrap integration', () => {
     expect(
       Number(
         (
-          app.db
+          (await app.db
             .prepare(
               "SELECT COUNT(*) AS n FROM files WHERE state IN ('ready','attached')",
             )
-            .get() as { n: bigint }
+            .get()) as { n: bigint }
         ).n,
       ),
     ).toBe(0);

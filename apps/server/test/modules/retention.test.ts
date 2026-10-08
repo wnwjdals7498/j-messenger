@@ -13,6 +13,10 @@ import type {
 import { MIGRATIONS } from '../../src/bootstrap/migrations.js';
 import { createDatabase } from '../../src/platform/database/index.js';
 import type { Database } from '../../src/platform/database/index.js';
+import {
+  asStorage,
+  type StorageDatabase,
+} from '../../src/platform/storage/index.js';
 import { JobStore } from '../../src/platform/jobs/index.js';
 import { createFilesService } from '../../src/modules/files/index.js';
 import { createAuditService } from '../../src/modules/audit/index.js';
@@ -43,6 +47,7 @@ const ctx: RequestContext = {
 describe('retention module', () => {
   let dir: string,
     db: Database,
+    storage: StorageDatabase,
     clock: TestClock,
     files: ReturnType<typeof createFilesService>;
   beforeEach(async () => {
@@ -52,6 +57,7 @@ describe('retention module', () => {
       migrations: MIGRATIONS,
       clock,
     });
+    storage = asStorage(db);
     await db.run(() =>
       db.prepare("INSERT INTO mail_servers VALUES('dev-a','dev-a')").run(),
     );
@@ -139,9 +145,11 @@ describe('retention module', () => {
           hasMore: rows.length > limit,
         };
       },
-      eventExpiredFile(tx, system, fileId) {
-        db.assertOwn(tx);
-        db.prepare('INSERT INTO test_file_events VALUES(?)').run(fileId);
+      async eventExpiredFile(tx, system, fileId) {
+        storage.assertOwn(tx);
+        await storage
+          .prepare('INSERT INTO test_file_events VALUES(?)')
+          .run(fileId);
       },
     });
     const first = await retention.runSystemBatch(sys, 1);

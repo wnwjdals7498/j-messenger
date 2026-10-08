@@ -17,11 +17,15 @@ import {
   type TxContext,
   type UserDirectory,
 } from '@j-messenger/contracts';
-import type { Database } from '../../platform/database/index.js';
+import { asStorage } from '../../platform/storage/index.js';
+import type {
+  StorageDatabase,
+  StorageInput,
+} from '../../platform/storage/index.js';
 
 type IdentityPort = UserDirectory & {
   get(context: RequestContext): Promise<unknown>;
-  sessionActive(context: RequestContext): boolean;
+  sessionActive(context: RequestContext): boolean | Promise<boolean>;
 };
 export interface ConversationService
   extends ConversationAccess, ConversationActivity, ConversationQueries {
@@ -41,14 +45,14 @@ export interface ConversationService
     tx: TxContext,
     system: SystemContext,
     conversationId: DecimalId,
-  ): readonly DecimalId[];
+  ): readonly DecimalId[] | Promise<readonly DecimalId[]>;
   hydrateEvent(
     context: RequestContext,
     record: EventRecord,
   ): Promise<EventDto | null>;
 }
 export interface ConversationOptions {
-  readonly db: Database;
+  readonly db: StorageInput;
   readonly identity: IdentityPort;
   readonly clock: Clock;
   readonly logger?: FeatureLog;
@@ -99,30 +103,33 @@ const safeEmit = (
   }
 };
 const dto = (
-  db: Database,
+  db: StorageDatabase,
   context: RequestContext,
   row: ConversationRow,
-): ConversationDto => ({
-  id: decimal(row.id) as DecimalId,
-  kind: row.kind,
-  title: row.title,
-  memberIds: (
-    db
-      .prepare(
-        'SELECT user_id FROM members WHERE server_id=? AND conversation_id=? ORDER BY user_id',
-      )
-      .all(context.serverId, row.id) as Array<{ user_id: bigint }>
-  ).map((member) => decimal(member.user_id) as DecimalId),
-  createdAt: row.created_at,
-  lastMessageAt: row.last_message_at,
-});
+): Promise<ConversationDto> =>
+  db
+    .prepare(
+      'SELECT user_id FROM members WHERE server_id=? AND conversation_id=? ORDER BY user_id',
+    )
+    .all(context.serverId, row.id)
+    .then((members) => ({
+      id: decimal(row.id) as DecimalId,
+      kind: row.kind,
+      title: row.title,
+      memberIds: (members as Array<{ user_id: bigint }>).map(
+        (member) => decimal(member.user_id) as DecimalId,
+      ),
+      createdAt: row.created_at,
+      lastMessageAt: row.last_message_at,
+    }));
 const toRow = (value: unknown): ConversationRow | undefined =>
   value as ConversationRow | undefined;
 
 export function createConversationService(
   options: ConversationOptions,
 ): ConversationService {
-  const { db, identity, clock, logger, cursorCodec } = options;
+  const db = asStorage(options.db);
+  const { identity, clock, logger, cursorCodec } = options;
   const assertContext = async (context: RequestContext): Promise<void> => {
     if (!positive(context.userId) || !positive(context.sessionId))
       throw new ConversationError('unauthorized');
@@ -132,24 +139,33 @@ export function createConversationService(
       throw new ConversationError('unauthorized');
     }
   };
-  const epoch = (): string => db.getStreamMetadata().epoch;
-  const encode = (context: RequestContext, position: string): string => {
+  const epoch = async (): Promise<string> =>
+    (await db.getStreamMetadata()).epoch;
+  const encode = async (
+    context: RequestContext,
+    position: string,
+    streamEpoch?: string,
+  ): Promise<string> => {
     if (!cursorCodec) throw new ConversationError('internal');
     return cursorCodec.encode({
       serverId: context.serverId,
       userId: context.userId,
-      epoch: epoch(),
+      epoch: streamEpoch ?? (await epoch()),
       position,
       expiresAt: new Date(clock.now().getTime() + 15 * 60_000).toISOString(),
     });
   };
-  const decode = (context: RequestContext, token: string): string => {
+  const decode = async (
+    context: RequestContext,
+    token: string,
+    streamEpoch?: string,
+  ): Promise<string> => {
     if (!cursorCodec) throw new ConversationError('bad_request');
     try {
       const result = cursorCodec.decode(token, {
         serverId: context.serverId,
         userId: context.userId,
-        epoch: epoch(),
+        epoch: streamEpoch ?? (await epoch()),
         now: clock.now(),
       });
       if (
@@ -164,24 +180,31 @@ export function createConversationService(
       throw new ConversationError('bad_request');
     }
   };
-  const encodeListCursor = (
+  const encodeListCursor = async (
     context: RequestContext,
     snapshotPosition: string,
     snapshotMax: string,
     after: string,
-  ): string =>
-    Buffer.from(
-      JSON.stringify({
-        snapshot: encode(context, snapshotPosition),
-        max: encode(context, snapshotMax),
-        after: encode(context, after),
-      }),
+  ): Promise<string> => {
+    const streamEpoch = await epoch();
+    const [snapshot, max, encodedAfter] = await Promise.all([
+      encode(context, snapshotPosition, streamEpoch),
+      encode(context, snapshotMax, streamEpoch),
+      encode(context, after, streamEpoch),
+    ]);
+    return Buffer.from(
+      JSON.stringify({ snapshot, max, after: encodedAfter }),
       'utf8',
     ).toString('base64url');
-  const decodeListCursor = (
+  };
+  const decodeListCursor = async (
     context: RequestContext,
     token: string,
-  ): { snapshotPosition: string; snapshotMax: string; after: string } => {
+  ): Promise<{
+    snapshotPosition: string;
+    snapshotMax: string;
+    after: string;
+  }> => {
     if (!/^[A-Za-z0-9_-]{1,4096}$/.test(token))
       throw new ConversationError('bad_request');
     try {
@@ -194,9 +217,12 @@ export function createConversationService(
         typeof value.after !== 'string'
       )
         throw new Error('invalid list cursor');
-      const snapshotPosition = decode(context, value.snapshot);
-      const snapshotMax = decode(context, value.max);
-      const after = decode(context, value.after);
+      const streamEpoch = await epoch();
+      const [snapshotPosition, snapshotMax, after] = await Promise.all([
+        decode(context, value.snapshot, streamEpoch),
+        decode(context, value.max, streamEpoch),
+        decode(context, value.after, streamEpoch),
+      ]);
       if (!positive(snapshotMax) && snapshotMax !== '0')
         throw new Error('invalid snapshot');
       if (!positive(after) && after !== '0')
@@ -208,13 +234,13 @@ export function createConversationService(
       throw new ConversationError('bad_request');
     }
   };
-  const getRow = (
+  const getRow = async (
     context: RequestContext,
     id: DecimalId,
-  ): ConversationRow | undefined => {
+  ): Promise<ConversationRow | undefined> => {
     if (!positive(id)) return undefined;
     return toRow(
-      db
+      await db
         .prepare(
           'SELECT id,kind,title,created_at,last_message_at FROM conversations WHERE server_id=? AND id=? AND EXISTS (SELECT 1 FROM members WHERE members.server_id=conversations.server_id AND members.conversation_id=conversations.id AND members.user_id=?)',
         )
@@ -257,10 +283,10 @@ export function createConversationService(
         .update(semantic, 'utf8')
         .digest('hex');
       try {
-        const result = await db.run((tx) => {
+        const result = await db.run(async (tx) => {
           db.assertOwn(tx);
           if (input.kind === 'group') {
-            const existing = db
+            const existing = (await db
               .prepare(
                 'SELECT payload_digest,conversation_id FROM conversation_requests WHERE server_id=? AND sender_id=? AND client_request_id=?',
               )
@@ -268,19 +294,22 @@ export function createConversationService(
                 context.serverId,
                 BigInt(context.userId),
                 input.clientRequestId,
-              ) as
+              )) as
               { payload_digest: string; conversation_id: bigint } | undefined;
             if (existing) {
               if (existing.payload_digest !== digest)
                 throw new ConversationError('conflict');
-              const row = db
+              const row = (await db
                 .prepare(
                   'SELECT id,kind,title,created_at,last_message_at FROM conversations WHERE server_id=? AND id=?',
                 )
-                .get(context.serverId, existing.conversation_id) as
+                .get(context.serverId, existing.conversation_id)) as
                 ConversationRow | undefined;
               if (!row) throw new ConversationError('internal');
-              return { conversation: dto(db, context, row), created: false };
+              return {
+                conversation: await dto(db, context, row),
+                created: false,
+              };
             }
           }
           let row: ConversationRow | undefined;
@@ -288,7 +317,7 @@ export function createConversationService(
           if (input.kind === 'direct') {
             const pair = members.join(':');
             row = toRow(
-              db
+              await db
                 .prepare(
                   'SELECT id,kind,title,created_at,last_message_at FROM conversations WHERE server_id=? AND direct_pair=?',
                 )
@@ -296,22 +325,26 @@ export function createConversationService(
             );
           }
           if (!row) {
-            db.prepare(
-              'INSERT INTO conversations(server_id,kind,title,direct_pair,created_at) VALUES(?,?,?,?,?)',
-            ).run(
-              context.serverId,
-              input.kind,
-              title,
-              input.kind === 'direct' ? members.join(':') : null,
-              clock.now().toISOString(),
-            );
-            const id = db.lastInsertId();
+            await db
+              .prepare(
+                'INSERT INTO conversations(server_id,kind,title,direct_pair,created_at) VALUES(?,?,?,?,?)',
+              )
+              .run(
+                context.serverId,
+                input.kind,
+                title,
+                input.kind === 'direct' ? members.join(':') : null,
+                clock.now().toISOString(),
+              );
+            const id = await db.lastInsertId();
             for (const userId of members)
-              db.prepare(
-                'INSERT INTO members(server_id,conversation_id,user_id) VALUES(?,?,?)',
-              ).run(context.serverId, BigInt(id), BigInt(userId));
+              await db
+                .prepare(
+                  'INSERT INTO members(server_id,conversation_id,user_id) VALUES(?,?,?)',
+                )
+                .run(context.serverId, BigInt(id), BigInt(userId));
             row = toRow(
-              db
+              await db
                 .prepare(
                   'SELECT id,kind,title,created_at,last_message_at FROM conversations WHERE server_id=? AND id=?',
                 )
@@ -320,16 +353,18 @@ export function createConversationService(
             if (!row) throw new ConversationError('internal');
             created = true;
             if (input.kind === 'group')
-              db.prepare(
-                'INSERT INTO conversation_requests(server_id,sender_id,client_request_id,payload_digest,conversation_id) VALUES(?,?,?,?,?)',
-              ).run(
-                context.serverId,
-                BigInt(context.userId),
-                input.clientRequestId,
-                digest,
-                BigInt(id),
-              );
-            db.append(tx, {
+              await db
+                .prepare(
+                  'INSERT INTO conversation_requests(server_id,sender_id,client_request_id,payload_digest,conversation_id) VALUES(?,?,?,?,?)',
+                )
+                .run(
+                  context.serverId,
+                  BigInt(context.userId),
+                  input.clientRequestId,
+                  digest,
+                  BigInt(id),
+                );
+            await db.eventWriter.append(tx, {
               type: 'conversation.created.v1',
               occurredAt: row.created_at,
               serverId: context.serverId,
@@ -363,7 +398,7 @@ export function createConversationService(
               ),
             );
           }
-          return { conversation: dto(db, context, row), created };
+          return { conversation: await dto(db, context, row), created };
         });
         return result;
       } catch (error) {
@@ -383,18 +418,18 @@ export function createConversationService(
     },
     async requireMember(context, conversationId) {
       await assertContext(context);
-      if (!getRow(context, conversationId)) {
+      if (!(await getRow(context, conversationId))) {
         safeEmit(logger, 'access.denied', 'rejected', context, {
           reasonCode: 'not_found',
         });
         throw new ConversationError('not_found');
       }
     },
-    recheckMember(tx: TxContext, context, conversationId) {
+    async recheckMember(tx: TxContext, context, conversationId) {
       db.assertOwn(tx);
-      if (!identity.sessionActive(context))
+      if (!(await identity.sessionActive(context)))
         throw new ConversationError('not_found');
-      if (!getRow(context, conversationId))
+      if (!(await getRow(context, conversationId)))
         throw new ConversationError('not_found');
     },
     async canAccess(context, conversationId) {
@@ -407,41 +442,43 @@ export function createConversationService(
         throw error;
       }
     },
-    recordMessage(tx, context, conversationId, occurredAt) {
+    async recordMessage(tx, context, conversationId, occurredAt) {
       db.assertOwn(tx);
-      service.recheckMember(tx, context, conversationId);
-      db.prepare(
-        'UPDATE conversations SET last_message_at=CASE WHEN last_message_at IS NULL OR last_message_at<? THEN ? ELSE last_message_at END WHERE server_id=? AND id=?',
-      ).run(occurredAt, occurredAt, context.serverId, BigInt(conversationId));
+      await service.recheckMember(tx, context, conversationId);
+      await db
+        .prepare(
+          'UPDATE conversations SET last_message_at=CASE WHEN last_message_at IS NULL OR last_message_at<? THEN ? ELSE last_message_at END WHERE server_id=? AND id=?',
+        )
+        .run(occurredAt, occurredAt, context.serverId, BigInt(conversationId));
     },
-    memberIds(context, conversationId) {
+    async memberIds(context, conversationId) {
       if (!positive(conversationId)) return [];
       return (
-        db
+        (await db
           .prepare(
             'SELECT user_id FROM members WHERE server_id=? AND conversation_id=? ORDER BY user_id',
           )
-          .all(context.serverId, BigInt(conversationId)) as Array<{
+          .all(context.serverId, BigInt(conversationId))) as Array<{
           user_id: bigint;
         }>
       ).map((row) => decimal(row.user_id) as DecimalId);
     },
-    memberIdsForSystem(tx, system, conversationId) {
+    async memberIdsForSystem(tx, system, conversationId) {
       db.assertOwn(tx);
       if (!positive(conversationId)) return [];
       return (
-        db
+        (await db
           .prepare(
             'SELECT user_id FROM members WHERE server_id=? AND conversation_id=? ORDER BY user_id',
           )
-          .all(system.serverId, BigInt(conversationId)) as Array<{
+          .all(system.serverId, BigInt(conversationId))) as Array<{
           user_id: bigint;
         }>
       ).map((row) => decimal(row.user_id) as DecimalId);
     },
     async get(context, conversationId) {
       await service.requireMember(context, conversationId);
-      const row = getRow(context, conversationId);
+      const row = await getRow(context, conversationId);
       if (!row) throw new ConversationError('not_found');
       return dto(db, context, row);
     },
@@ -467,25 +504,29 @@ export function createConversationService(
       await assertContext(context);
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
         throw new ConversationError('bad_request');
-      const prior = cursor === null ? null : decodeListCursor(context, cursor);
-      const snapshot = await db.run((tx) => {
-        if (!identity.sessionActive(context))
+      const prior =
+        cursor === null ? null : await decodeListCursor(context, cursor);
+      const snapshot = await db.run(async (tx) => {
+        if (!(await identity.sessionActive(context)))
           throw new ConversationError('unauthorized');
         const position =
-          prior?.snapshotPosition ?? db.snapshotPosition(tx, context);
+          prior?.snapshotPosition ??
+          (await db.eventReader.snapshotPosition(tx, context));
         const maxId =
           prior?.snapshotMax ??
           decimal(
             (
-              db
+              (await db
                 .prepare(
                   'SELECT COALESCE(MAX(c.id),0) AS id FROM conversations c JOIN members m ON m.server_id=c.server_id AND m.conversation_id=c.id WHERE c.server_id=? AND m.user_id=?',
                 )
-                .get(context.serverId, BigInt(context.userId)) as { id: bigint }
+                .get(context.serverId, BigInt(context.userId))) as {
+                id: bigint;
+              }
             ).id,
           );
         const after = prior?.after ?? '0';
-        const rows = db
+        const rows = (await db
           .prepare(
             'SELECT c.id,c.kind,c.title,c.created_at,c.last_message_at FROM conversations c JOIN members m ON m.server_id=c.server_id AND m.conversation_id=c.id WHERE c.server_id=? AND m.user_id=? AND c.id>? AND c.id<=? ORDER BY c.id LIMIT ?',
           )
@@ -495,14 +536,14 @@ export function createConversationService(
             BigInt(after),
             BigInt(maxId),
             limit + 1,
-          ) as ConversationRow[];
+          )) as ConversationRow[];
         const hasMore = rows.length > limit;
         const page = rows.slice(0, limit);
         return {
           position,
           maxId,
           hasMore,
-          items: page.map((row) => dto(db, context, row)),
+          items: await Promise.all(page.map((row) => dto(db, context, row))),
           lastId: page.at(-1) ? decimal(page.at(-1)!.id) : null,
         };
       });
@@ -513,14 +554,14 @@ export function createConversationService(
         items: snapshot.items,
         nextCursor:
           snapshot.hasMore && snapshot.lastId
-            ? encodeListCursor(
+            ? await encodeListCursor(
                 context,
                 snapshot.position,
                 snapshot.maxId,
                 snapshot.lastId,
               )
             : null,
-        snapshotCursor: encode(context, snapshot.position),
+        snapshotCursor: await encode(context, snapshot.position),
         snapshotPosition: snapshot.position,
       };
     },
@@ -528,11 +569,11 @@ export function createConversationService(
       await assertContext(context);
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
         throw new ConversationError('bad_request');
-      const result = await db.run((tx) => {
-        if (!identity.sessionActive(context))
+      const result = await db.run(async (tx) => {
+        if (!(await identity.sessionActive(context)))
           throw new ConversationError('unauthorized');
-        const position = db.snapshotPosition(tx, context);
-        const rows = db
+        const position = await db.eventReader.snapshotPosition(tx, context);
+        const rows = (await db
           .prepare(
             'SELECT c.id,c.kind,c.title,c.created_at,c.last_message_at FROM conversations c JOIN members m ON m.server_id=c.server_id AND m.conversation_id=c.id WHERE c.server_id=? AND m.user_id=? ORDER BY c.id LIMIT ?',
           )
@@ -540,12 +581,15 @@ export function createConversationService(
             context.serverId,
             BigInt(context.userId),
             limit,
-          ) as ConversationRow[];
-        return { position, items: rows.map((row) => dto(db, context, row)) };
+          )) as ConversationRow[];
+        return {
+          position,
+          items: await Promise.all(rows.map((row) => dto(db, context, row))),
+        };
       });
       return {
         items: result.items,
-        snapshotCursor: encode(context, result.position),
+        snapshotCursor: await encode(context, result.position),
         snapshotPosition: result.position,
       };
     },

@@ -202,7 +202,7 @@ describe('identity module', () => {
       requestId,
     });
     expect(await identity.get(context)).toEqual(logged.user);
-    expect(identity.sessionActive(context)).toBe(true);
+    expect(await identity.sessionActive(context)).toBe(true);
     await expect(
       identity.resolve({
         credential: `${logged.credential.slice(0, -1)}x`,
@@ -213,7 +213,7 @@ describe('identity module', () => {
       ...context,
       userId: '99999999999999999' as RequestContext['userId'],
     };
-    expect(identity.sessionActive(forged)).toBe(false);
+    expect(await identity.sessionActive(forged)).toBe(false);
     await expect(identity.get(forged)).rejects.toMatchObject({
       code: 'unauthorized',
     });
@@ -221,12 +221,12 @@ describe('identity module', () => {
       ...context,
       serverId: 'dev-b' as RequestContext['serverId'],
     };
-    expect(identity.sessionActive(wrongServer)).toBe(false);
+    expect(await identity.sessionActive(wrongServer)).toBe(false);
     await expect(identity.get(wrongServer)).rejects.toMatchObject({
       code: 'unauthorized',
     });
     expect(
-      identity.sessionActive({
+      await identity.sessionActive({
         ...context,
         sessionId: 'bad' as RequestContext['sessionId'],
       }),
@@ -237,7 +237,7 @@ describe('identity module', () => {
     });
     await identity.logout(context);
     await identity.logout(context);
-    expect(identity.sessionActive(context)).toBe(false);
+    expect(await identity.sessionActive(context)).toBe(false);
     await expect(
       identity.resolve({ credential: logged.credential, requestId }),
     ).rejects.toMatchObject({ code: 'unauthorized' });
@@ -247,7 +247,7 @@ describe('identity module', () => {
       requestId,
     });
     clock.advance(8 * 86_400_000);
-    expect(identity.sessionActive(expiredContext)).toBe(false);
+    expect(await identity.sessionActive(expiredContext)).toBe(false);
     await expect(
       identity.resolve({ credential: expired.credential, requestId }),
     ).rejects.toMatchObject({ code: 'unauthorized' });
@@ -396,8 +396,8 @@ describe('identity module', () => {
       username: 'messenger-user',
     });
     expect(db.prepare('SELECT count(*) AS n FROM sessions').get()!.n).toBe(0n);
-    expect(identity.sessionActive(context)).toBe(true);
-    expect(identity.sessionActive({ ...context })).toBe(false);
+    expect(await identity.sessionActive(context)).toBe(true);
+    expect(await identity.sessionActive({ ...context })).toBe(false);
     expect(await identity.get(context)).toMatchObject({
       id: '1',
       serverId: tenantId,
@@ -508,7 +508,7 @@ describe('identity module', () => {
     expect(JSON.stringify(records)).not.toContain('unsafe\nuser');
 
     clock.advance(5 * 60_000 + 1);
-    expect(identity.sessionActive(context)).toBe(false);
+    expect(await identity.sessionActive(context)).toBe(false);
     await expect(identity.get(context)).rejects.toMatchObject({
       code: 'unauthorized',
     });

@@ -88,8 +88,8 @@ const hideSqliteError = (error: unknown): unknown => {
 export class Database implements UnitOfWork, EventWriter, EventReader {
   readonly connection!: DatabaseSync;
   readonly unitOfWork: UnitOfWork = this;
-  readonly eventWriter: EventWriter = this;
-  readonly eventReader: EventReader = this;
+  readonly eventWriter = this;
+  readonly eventReader = this;
   private readonly clock: Clock;
   private readonly logger: FeatureLog | undefined;
   private readonly ownedTransactions = new WeakSet<object>();

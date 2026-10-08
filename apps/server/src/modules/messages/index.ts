@@ -18,14 +18,14 @@ import {
   type TxContext,
   type Uuid,
 } from '@j-messenger/contracts';
-import type { Database } from '../../platform/database/index.js';
+import { asStorage, type StorageInput } from '../../platform/storage/index.js';
 
 export interface FilesPort extends Pick<FileCommands, 'bind'> {
   attachedLiveIds(
     tx: TxContext,
     context: RequestContext | SystemContext,
     messageId: DecimalId,
-  ): readonly Uuid[];
+  ): readonly Uuid[] | Promise<readonly Uuid[]>;
 }
 export interface MessageService extends MessageCommandsSurface, MessageQueries {
   validateMessage(
@@ -33,15 +33,19 @@ export interface MessageService extends MessageCommandsSurface, MessageQueries {
     context: RequestContext,
     conversationId: DecimalId,
     messageId: DecimalId,
-  ): MessageOutput;
+  ): Promise<MessageOutput>;
   purgeExpiredBatch(
     tx: TxContext,
     system: SystemContext,
     cutoff: string,
     afterId: string,
     limit: number,
-  ): { processed: number; lastId: string; hasMore: boolean };
-  expireFileReference(tx: TxContext, system: SystemContext, fileId: Uuid): void;
+  ): Promise<{ processed: number; lastId: string; hasMore: boolean }>;
+  expireFileReference(
+    tx: TxContext,
+    system: SystemContext,
+    fileId: Uuid,
+  ): Promise<void>;
   hydrateEvent(
     context: RequestContext,
     record: EventRecord,
@@ -60,14 +64,14 @@ interface MessageCommandsSurface {
   ): Promise<{ message: MessageOutput; created: boolean; status: 200 | 201 }>;
 }
 export interface MessageOptions {
-  readonly db: Database;
+  readonly db: StorageInput;
   readonly access: ConversationAccess;
   readonly activity: ConversationActivity & {
     memberIdsForSystem(
       tx: TxContext,
       system: SystemContext,
       conversationId: DecimalId,
-    ): readonly DecimalId[];
+    ): readonly DecimalId[] | Promise<readonly DecimalId[]>;
   };
   readonly clock: Clock;
   readonly logger?: FeatureLog;
@@ -124,32 +128,37 @@ const safeEmit = (
 };
 
 export function createMessageService(options: MessageOptions): MessageService {
-  const { db, access, activity, clock, logger, files, cursorCodec } = options;
-  const epoch = (): string => db.getStreamMetadata().epoch;
-  const encode = (context: RequestContext, position: string): string => {
+  const { access, activity, clock, logger, files, cursorCodec } = options;
+  const db = asStorage(options.db);
+  const epoch = async (): Promise<string> =>
+    (await db.getStreamMetadata()).epoch;
+  const encode = async (
+    context: RequestContext,
+    position: string,
+  ): Promise<string> => {
     return cursorCodec.encode({
       serverId: context.serverId,
       userId: context.userId,
-      epoch: epoch(),
+      epoch: await epoch(),
       position,
       expiresAt: new Date(clock.now().getTime() + 15 * 60_000).toISOString(),
     });
   };
   const messageQuery =
     'SELECT id,conversation_id,sender_id,client_message_id,text,content_expired,created_at FROM messages';
-  const validateMessage = (
+  const validateMessage = async (
     tx: TxContext,
     context: RequestContext,
     conversationId: DecimalId,
     messageId: DecimalId,
-  ): MessageOutput => {
+  ): Promise<MessageOutput> => {
     db.assertOwn(tx);
-    access.recheckMember(tx, context, conversationId);
-    const row = db
+    await access.recheckMember(tx, context, conversationId);
+    const row = (await db
       .prepare(
         `${messageQuery} WHERE server_id=? AND conversation_id=? AND id=?`,
       )
-      .get(context.serverId, BigInt(conversationId), BigInt(messageId)) as
+      .get(context.serverId, BigInt(conversationId), BigInt(messageId))) as
       MessageRow | undefined;
     if (!row) throw new MessageError('not_found');
     return output(tx, context, row);
@@ -159,23 +168,25 @@ export function createMessageService(options: MessageOptions): MessageService {
     context: RequestContext,
     conversationId: DecimalId,
     messageId: DecimalId,
-  ): Uuid[] => {
-    if (!files) return [];
+  ): Promise<Uuid[]> => {
+    if (!files) return Promise.resolve([]);
     void conversationId;
-    return [...files.attachedLiveIds(tx, context, messageId)];
+    return Promise.resolve(files.attachedLiveIds(tx, context, messageId)).then(
+      (ids) => [...ids],
+    );
   };
-  const output = (
+  const output = async (
     tx: TxContext,
     context: RequestContext,
     row: MessageRow,
-  ): MessageOutput => ({
+  ): Promise<MessageOutput> => ({
     id: decimal(row.id) as DecimalId,
     conversationId: decimal(row.conversation_id) as DecimalId,
     senderId: decimal(row.sender_id) as DecimalId,
     clientMessageId: row.client_message_id as Uuid,
     text: row.content_expired === 1n ? null : row.text,
     contentExpired: row.content_expired === 1n,
-    fileIds: fileIds(
+    fileIds: await fileIds(
       tx,
       context,
       decimal(row.conversation_id) as DecimalId,
@@ -183,13 +194,13 @@ export function createMessageService(options: MessageOptions): MessageService {
     ),
     createdAt: row.created_at,
   });
-  const purgeBatch = (
+  const purgeBatch = async (
     tx: TxContext,
     system: SystemContext,
     cutoff: string,
     afterId: string,
     limit: number,
-  ) => {
+  ): Promise<{ processed: number; lastId: string; hasMore: boolean }> => {
     db.assertOwn(tx);
     if (
       !/^[a-z0-9-]{1,32}$/.test(system.serverId) ||
@@ -200,11 +211,11 @@ export function createMessageService(options: MessageOptions): MessageService {
       limit > 5000
     )
       throw new MessageError('bad_request');
-    const rows = db
+    const rows = (await db
       .prepare(
         'SELECT id,conversation_id,sender_id,client_message_id,created_at FROM messages WHERE server_id=? AND content_expired=0 AND created_at<=? AND id>? ORDER BY id LIMIT ?',
       )
-      .all(system.serverId, cutoff, BigInt(afterId), limit) as Array<{
+      .all(system.serverId, cutoff, BigInt(afterId), limit)) as Array<{
       id: bigint;
       conversation_id: bigint;
       sender_id: bigint;
@@ -215,79 +226,104 @@ export function createMessageService(options: MessageOptions): MessageService {
     const fileCutoff = new Date(
       clock.now().getTime() - 14 * 86_400_000,
     ).toISOString();
-    const oldTombstones = db
+    const oldTombstones = (await db
       .prepare(
         'SELECT id FROM messages WHERE server_id=? AND content_expired=1 AND created_at<=? ORDER BY id LIMIT ?',
       )
-      .all(system.serverId, fileCutoff, limit) as Array<{ id: bigint }>;
+      .all(system.serverId, fileCutoff, limit)) as Array<{ id: bigint }>;
     let removedTombstones = 0;
     for (const tombstone of oldTombstones) {
       if (files) {
         const live = new Set(
-          files.attachedLiveIds(tx, system, decimal(tombstone.id) as DecimalId),
+          await files.attachedLiveIds(
+            tx,
+            system,
+            decimal(tombstone.id) as DecimalId,
+          ),
         );
-        const bound = db
+        const bound = (await db
           .prepare(
             'SELECT file_id FROM message_files WHERE server_id=? AND message_id=?',
           )
-          .all(system.serverId, tombstone.id) as Array<{ file_id: string }>;
+          .all(system.serverId, tombstone.id)) as Array<{ file_id: string }>;
         for (const file of bound)
           if (!live.has(file.file_id as Uuid))
-            db.prepare(
-              'DELETE FROM message_files WHERE server_id=? AND message_id=? AND file_id=?',
-            ).run(system.serverId, tombstone.id, file.file_id);
+            await db
+              .prepare(
+                'DELETE FROM message_files WHERE server_id=? AND message_id=? AND file_id=?',
+              )
+              .run(system.serverId, tombstone.id, file.file_id);
       }
-      const remains = db
+      const remains = await db
         .prepare(
           'SELECT 1 AS found FROM message_files WHERE server_id=? AND message_id=? LIMIT 1',
         )
         .get(system.serverId, tombstone.id);
       if (remains) continue;
-      db.prepare(
-        'UPDATE message_dedup SET message_id=NULL WHERE server_id=? AND message_id=?',
-      ).run(system.serverId, tombstone.id);
-      db.prepare(
-        'DELETE FROM messages WHERE server_id=? AND id=? AND content_expired=1',
-      ).run(system.serverId, tombstone.id);
+      await db
+        .prepare(
+          'UPDATE message_dedup SET message_id=NULL WHERE server_id=? AND message_id=?',
+        )
+        .run(system.serverId, tombstone.id);
+      await db
+        .prepare(
+          'DELETE FROM messages WHERE server_id=? AND id=? AND content_expired=1',
+        )
+        .run(system.serverId, tombstone.id);
       removedTombstones++;
     }
     const dedupCutoff = new Date(
       clock.now().getTime() - 30 * 86_400_000,
     ).toISOString();
-    const oldDedup = db
+    const oldDedup = (await db
       .prepare(
-        'SELECT rowid FROM message_dedup WHERE server_id=? AND expired_at IS NOT NULL AND expired_at<=? AND message_id IS NULL ORDER BY expired_at LIMIT ?',
+        'SELECT sender_id,client_message_id FROM message_dedup WHERE server_id=? AND expired_at IS NOT NULL AND expired_at<=? AND message_id IS NULL ORDER BY expired_at LIMIT ?',
       )
-      .all(system.serverId, dedupCutoff, limit) as Array<{ rowid: bigint }>;
+      .all(system.serverId, dedupCutoff, limit)) as Array<{
+      sender_id: bigint;
+      client_message_id: string;
+    }>;
     for (const item of oldDedup)
-      db.prepare('DELETE FROM message_dedup WHERE rowid=?').run(item.rowid);
+      await db
+        .prepare(
+          'DELETE FROM message_dedup WHERE server_id=? AND sender_id=? AND client_message_id=?',
+        )
+        .run(system.serverId, item.sender_id, item.client_message_id);
     for (const row of rows) {
       const messageId = decimal(row.id) as DecimalId;
       const conversationId = decimal(row.conversation_id) as DecimalId;
-      db.prepare(
-        'UPDATE messages SET text=NULL,content_expired=1 WHERE server_id=? AND id=? AND content_expired=0',
-      ).run(system.serverId, row.id);
-      db.prepare(
-        'UPDATE message_dedup SET expired_at=? WHERE server_id=? AND sender_id=? AND client_message_id=? AND expired_at IS NULL',
-      ).run(now, system.serverId, row.sender_id, row.client_message_id);
-      const live = new Set(files?.attachedLiveIds(tx, system, messageId) ?? []);
-      const bound = db
+      await db
+        .prepare(
+          'UPDATE messages SET text=NULL,content_expired=1 WHERE server_id=? AND id=? AND content_expired=0',
+        )
+        .run(system.serverId, row.id);
+      await db
+        .prepare(
+          'UPDATE message_dedup SET expired_at=? WHERE server_id=? AND sender_id=? AND client_message_id=? AND expired_at IS NULL',
+        )
+        .run(now, system.serverId, row.sender_id, row.client_message_id);
+      const live = new Set(
+        files ? await files.attachedLiveIds(tx, system, messageId) : [],
+      );
+      const bound = (await db
         .prepare(
           'SELECT file_id FROM message_files WHERE server_id=? AND message_id=?',
         )
-        .all(system.serverId, row.id) as Array<{ file_id: string }>;
+        .all(system.serverId, row.id)) as Array<{ file_id: string }>;
       for (const file of bound)
         if (!live.has(file.file_id as Uuid))
-          db.prepare(
-            'DELETE FROM message_files WHERE server_id=? AND message_id=? AND file_id=?',
-          ).run(system.serverId, row.id, file.file_id);
-      db.append(tx, {
+          await db
+            .prepare(
+              'DELETE FROM message_files WHERE server_id=? AND message_id=? AND file_id=?',
+            )
+            .run(system.serverId, row.id, file.file_id);
+      await db.eventWriter.append(tx, {
         type: 'message.deleted.v1',
         occurredAt: now,
         serverId: system.serverId,
         conversationId,
         entityId: messageId,
-        recipientUserIds: activity.memberIdsForSystem(
+        recipientUserIds: await activity.memberIdsForSystem(
           tx,
           system,
           conversationId,
@@ -297,11 +333,11 @@ export function createMessageService(options: MessageOptions): MessageService {
     }
     const lastId = rows.length ? decimal(rows.at(-1)!.id) : afterId;
     const hasMore =
-      db
+      (await db
         .prepare(
           'SELECT 1 AS found FROM messages WHERE server_id=? AND content_expired=0 AND created_at<=? AND id>? LIMIT 1',
         )
-        .get(system.serverId, cutoff, BigInt(lastId)) !== undefined;
+        .get(system.serverId, cutoff, BigInt(lastId))) !== undefined;
     if (rows.length)
       tx.afterCommit(() =>
         safeEmit(logger, 'messages.content.purged', 'success', system, {
@@ -309,57 +345,63 @@ export function createMessageService(options: MessageOptions): MessageService {
         }),
       );
     const hasTombstones =
-      db
+      (await db
         .prepare(
           'SELECT 1 AS found FROM messages WHERE server_id=? AND content_expired=1 AND created_at<=? LIMIT 1',
         )
-        .get(system.serverId, fileCutoff) !== undefined;
+        .get(system.serverId, fileCutoff)) !== undefined;
     const hasDedup =
-      db
+      (await db
         .prepare(
           'SELECT 1 AS found FROM message_dedup WHERE server_id=? AND expired_at IS NOT NULL AND expired_at<=? AND message_id IS NULL LIMIT 1',
         )
-        .get(system.serverId, dedupCutoff) !== undefined;
+        .get(system.serverId, dedupCutoff)) !== undefined;
     return {
       processed: rows.length + removedTombstones + oldDedup.length,
       lastId,
       hasMore: hasMore || hasTombstones || hasDedup,
     };
   };
-  const expireFileReference = (
+  const expireFileReference = async (
     tx: TxContext,
     system: SystemContext,
     fileId: Uuid,
-  ): void => {
+  ): Promise<void> => {
     db.assertOwn(tx);
-    const row = db
+    const row = (await db
       .prepare(
         'SELECT message_id FROM message_files WHERE server_id=? AND file_id=?',
       )
-      .get(system.serverId, fileId) as { message_id: bigint } | undefined;
+      .get(system.serverId, fileId)) as { message_id: bigint } | undefined;
     if (!row) return;
-    db.prepare(
-      'DELETE FROM message_files WHERE server_id=? AND message_id=? AND file_id=?',
-    ).run(system.serverId, row.message_id, fileId);
-    const message = db
+    await db
+      .prepare(
+        'DELETE FROM message_files WHERE server_id=? AND message_id=? AND file_id=?',
+      )
+      .run(system.serverId, row.message_id, fileId);
+    const message = (await db
       .prepare(
         'SELECT content_expired FROM messages WHERE server_id=? AND id=?',
       )
-      .get(system.serverId, row.message_id) as
+      .get(system.serverId, row.message_id)) as
       { content_expired: bigint } | undefined;
     if (!message || message.content_expired !== 1n) return;
-    const remaining = db
+    const remaining = await db
       .prepare(
         'SELECT 1 AS found FROM message_files WHERE server_id=? AND message_id=? LIMIT 1',
       )
       .get(system.serverId, row.message_id);
     if (remaining) return;
-    db.prepare(
-      'UPDATE message_dedup SET message_id=NULL WHERE server_id=? AND message_id=?',
-    ).run(system.serverId, row.message_id);
-    db.prepare(
-      'DELETE FROM messages WHERE server_id=? AND id=? AND content_expired=1',
-    ).run(system.serverId, row.message_id);
+    await db
+      .prepare(
+        'UPDATE message_dedup SET message_id=NULL WHERE server_id=? AND message_id=?',
+      )
+      .run(system.serverId, row.message_id);
+    await db
+      .prepare(
+        'DELETE FROM messages WHERE server_id=? AND id=? AND content_expired=1',
+      )
+      .run(system.serverId, row.message_id);
     tx.afterCommit(() =>
       safeEmit(logger, 'messages.tombstone.removed', 'success', system, {
         count: 1,
@@ -383,10 +425,10 @@ export function createMessageService(options: MessageOptions): MessageService {
         return null;
       if (!(await access.canAccess(context, record.conversationId)))
         return null;
-      return db.run((tx) => {
+      return db.run(async (tx) => {
         db.assertOwn(tx);
-        access.recheckMember(tx, context, record.conversationId!);
-        const row = db
+        await access.recheckMember(tx, context, record.conversationId!);
+        const row = (await db
           .prepare(
             `${messageQuery} WHERE server_id=? AND conversation_id=? AND id=?`,
           )
@@ -394,14 +436,14 @@ export function createMessageService(options: MessageOptions): MessageService {
             context.serverId,
             BigInt(record.conversationId!),
             BigInt(record.entityId),
-          ) as MessageRow | undefined;
+          )) as MessageRow | undefined;
         if (!row && record.type === 'message.created.v1') return null;
         const fileIds = row
-          ? (files?.attachedLiveIds(
+          ? ((await files?.attachedLiveIds(
               tx,
               context,
               record.entityId as DecimalId,
-            ) ?? [])
+            )) ?? [])
           : [];
         const data =
           record.type === 'message.deleted.v1'
@@ -411,7 +453,7 @@ export function createMessageService(options: MessageOptions): MessageService {
                 fileIds: [...fileIds],
               }
             : row
-              ? { ...output(tx, context, row), fileIds: [...fileIds] }
+              ? { ...(await output(tx, context, row)), fileIds: [...fileIds] }
               : null;
         if (!data) return null;
         return {
@@ -450,10 +492,10 @@ export function createMessageService(options: MessageOptions): MessageService {
         throw new MessageError('bad_request');
       if (ids.length > 0 && !files) throw new MessageError('unavailable');
       try {
-        return await db.run((tx) => {
+        return await db.run(async (tx) => {
           db.assertOwn(tx);
-          access.recheckMember(tx, context, conversationId);
-          const prior = db
+          await access.recheckMember(tx, context, conversationId);
+          const prior = (await db
             .prepare(
               'SELECT conversation_id,message_id,expired_at FROM message_dedup WHERE server_id=? AND sender_id=? AND client_message_id=?',
             )
@@ -461,7 +503,7 @@ export function createMessageService(options: MessageOptions): MessageService {
               context.serverId,
               BigInt(context.userId),
               input.clientMessageId,
-            ) as
+            )) as
             | {
                 conversation_id: bigint;
                 message_id: bigint | null;
@@ -474,62 +516,68 @@ export function createMessageService(options: MessageOptions): MessageService {
             const row =
               prior.message_id === null
                 ? undefined
-                : (db
+                : ((await db
                     .prepare(`${messageQuery} WHERE server_id=? AND id=?`)
-                    .get(context.serverId, prior.message_id) as
+                    .get(context.serverId, prior.message_id)) as
                     MessageRow | undefined);
             if (!row || row.content_expired === 1n || prior.expired_at !== null)
               throw new MessageError('message_expired');
             if (row.text !== normalized) throw new MessageError('conflict');
             const bound = (
-              db
+              (await db
                 .prepare(
                   'SELECT file_id FROM message_files WHERE server_id=? AND message_id=? ORDER BY file_id',
                 )
-                .all(context.serverId, row.id) as Array<{ file_id: string }>
+                .all(context.serverId, row.id)) as Array<{ file_id: string }>
             )
               .map((item) => item.file_id)
               .sort();
             if (JSON.stringify(bound) !== JSON.stringify(ids))
               throw new MessageError('conflict');
             return {
-              message: output(tx, context, row),
+              message: await output(tx, context, row),
               created: false,
               status: 200 as const,
             };
           }
           const now = clock.now().toISOString();
-          db.prepare(
-            'INSERT INTO messages(server_id,conversation_id,sender_id,client_message_id,text,created_at) VALUES(?,?,?,?,?,?)',
-          ).run(
-            context.serverId,
-            BigInt(conversationId),
-            BigInt(context.userId),
-            input.clientMessageId,
-            normalized,
-            now,
-          );
-          const messageId = db.lastInsertId();
-          db.prepare(
-            'INSERT INTO message_dedup(server_id,sender_id,client_message_id,conversation_id,message_id,created_at,expired_at) VALUES(?,?,?,?,?,?,NULL)',
-          ).run(
-            context.serverId,
-            BigInt(context.userId),
-            input.clientMessageId,
-            BigInt(conversationId),
-            BigInt(messageId),
-            now,
-          );
+          await db
+            .prepare(
+              'INSERT INTO messages(server_id,conversation_id,sender_id,client_message_id,text,created_at) VALUES(?,?,?,?,?,?)',
+            )
+            .run(
+              context.serverId,
+              BigInt(conversationId),
+              BigInt(context.userId),
+              input.clientMessageId,
+              normalized,
+              now,
+            );
+          const messageId = await db.lastInsertId();
+          await db
+            .prepare(
+              'INSERT INTO message_dedup(server_id,sender_id,client_message_id,conversation_id,message_id,created_at,expired_at) VALUES(?,?,?,?,?,?,NULL)',
+            )
+            .run(
+              context.serverId,
+              BigInt(context.userId),
+              input.clientMessageId,
+              BigInt(conversationId),
+              BigInt(messageId),
+              now,
+            );
           if (ids.length) {
-            files!.bind(tx, context, conversationId, messageId, ids);
+            await files!.bind(tx, context, conversationId, messageId, ids);
             for (const fileId of ids)
-              db.prepare(
-                'INSERT INTO message_files(server_id,message_id,file_id) VALUES(?,?,?)',
-              ).run(context.serverId, BigInt(messageId), fileId);
+              await db
+                .prepare(
+                  'INSERT INTO message_files(server_id,message_id,file_id) VALUES(?,?,?)',
+                )
+                .run(context.serverId, BigInt(messageId), fileId);
           }
-          activity.recordMessage(tx, context, conversationId, now);
-          const members = activity.memberIds(context, conversationId);
-          db.append(tx, {
+          await activity.recordMessage(tx, context, conversationId, now);
+          const members = await activity.memberIds(context, conversationId);
+          await db.eventWriter.append(tx, {
             type: 'message.created.v1',
             occurredAt: now,
             serverId: context.serverId,
@@ -538,9 +586,10 @@ export function createMessageService(options: MessageOptions): MessageService {
             recipientUserIds: members,
             payloadRef: { entityType: 'message', entityId: messageId },
           });
-          const row = db
+          const row = (await db
             .prepare(`${messageQuery} WHERE server_id=? AND id=?`)
-            .get(context.serverId, BigInt(messageId)) as MessageRow | undefined;
+            .get(context.serverId, BigInt(messageId))) as
+            MessageRow | undefined;
           if (!row) throw new MessageError('internal');
           tx.afterCommit(() =>
             safeEmit(logger, 'messages.accepted', 'success', context, {
@@ -550,7 +599,7 @@ export function createMessageService(options: MessageOptions): MessageService {
             }),
           );
           return {
-            message: output(tx, context, row),
+            message: await output(tx, context, row),
             created: true,
             status: 201 as const,
           };
@@ -583,13 +632,16 @@ export function createMessageService(options: MessageOptions): MessageService {
       )
         throw new MessageError('bad_request');
       await access.requireMember(context, conversationId);
-      const result = await db.run((tx) => {
-        access.recheckMember(tx, context, conversationId);
-        const snapshotPosition = db.snapshotPosition(tx, context);
+      const result = await db.run(async (tx) => {
+        await access.recheckMember(tx, context, conversationId);
+        const snapshotPosition = await db.eventReader.snapshotPosition(
+          tx,
+          context,
+        );
         const boundary = input.before ?? input.after;
         const direction = input.before ? '<' : input.after ? '>' : '<';
         const sort = input.after ? 'ASC' : 'DESC';
-        const rows = db
+        const rows = (await db
           .prepare(
             `${messageQuery} WHERE server_id=? AND conversation_id=? AND id ${direction} ? ORDER BY id ${sort} LIMIT ?`,
           )
@@ -602,14 +654,16 @@ export function createMessageService(options: MessageOptions): MessageService {
                 ? 0n
                 : 9223372036854775807n,
             input.limit + 1,
-          ) as MessageRow[];
+          )) as MessageRow[];
         const pageRows = rows.slice(0, input.limit);
         if (!input.after) pageRows.reverse();
         const hasMore = rows.length > input.limit;
         const last = pageRows.at(-1);
         const nextCursor = hasMore && last ? decimal(last.id) : null;
+        const items: MessageOutput[] = [];
+        for (const row of pageRows) items.push(await output(tx, context, row));
         return {
-          items: pageRows.map((row) => output(tx, context, row)),
+          items,
           nextCursor,
           snapshotPosition,
         };
@@ -620,7 +674,7 @@ export function createMessageService(options: MessageOptions): MessageService {
       });
       return {
         ...result,
-        snapshotCursor: encode(context, result.snapshotPosition),
+        snapshotCursor: await encode(context, result.snapshotPosition),
         snapshotPosition: result.snapshotPosition,
       };
     },
@@ -629,7 +683,7 @@ export function createMessageService(options: MessageOptions): MessageService {
       cutoff = new Date(clock.now().getTime() - 5 * 86_400_000).toISOString(),
       limit = 500,
     ) {
-      const result = await db.run((tx) =>
+      const result = await db.run(async (tx) =>
         purgeBatch(tx, system, cutoff, '0', limit),
       );
       return { purged: result.processed };

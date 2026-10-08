@@ -11,6 +11,9 @@ export type ConfigKey =
   | 'PUBLIC_ORIGIN'
   | 'PATHS'
   | 'DB_PATH'
+  | 'DATABASE_DRIVER'
+  | 'DATABASE_URL'
+  | 'DATABASE_SCHEMA'
   | 'AUTH_MODE'
   | 'JAUTH_TENANT'
   | 'KC_PUBLIC_URL'
@@ -41,6 +44,9 @@ export interface AppConfig {
   readonly port: number;
   readonly publicOrigin: string;
   readonly dbPath: string;
+  readonly databaseDriver: 'sqlite' | 'postgres';
+  readonly databaseUrl?: string;
+  readonly databaseSchema?: string;
   readonly fileRoot: string;
   readonly tempRoot: string;
   readonly webDist: string;
@@ -188,7 +194,41 @@ export function loadConfig(
   if (typedMode === 'production' && !secureCookies)
     return fail('SECURE_COOKIES');
 
-  if (typedMode === 'production' && !env['DB_PATH']) return fail('DB_PATH');
+  const databaseDriver = env['DATABASE_DRIVER'] ?? 'sqlite';
+  if (!['sqlite', 'postgres'].includes(databaseDriver))
+    return fail('DATABASE_DRIVER');
+  let databaseUrl: string | undefined;
+  const databaseSchema = env['DATABASE_SCHEMA'] ?? 'public';
+  if (
+    !/^[a-z][a-z0-9_]{0,62}$/.test(databaseSchema) ||
+    (databaseDriver !== 'postgres' && env['DATABASE_SCHEMA'])
+  )
+    return fail('DATABASE_SCHEMA');
+  if (databaseDriver === 'postgres') {
+    try {
+      const parsed = new URL(env['DATABASE_URL'] ?? '');
+      if (
+        !['postgres:', 'postgresql:'].includes(parsed.protocol) ||
+        !['localhost', '127.0.0.1'].includes(parsed.hostname) ||
+        !parsed.username ||
+        !parsed.password ||
+        parsed.pathname !== '/jgw_messenger' ||
+        parsed.port === '3001' ||
+        parsed.search ||
+        parsed.hash
+      )
+        return fail('DATABASE_URL');
+      databaseUrl = parsed.href;
+    } catch {
+      return fail('DATABASE_URL');
+    }
+  } else if (env['DATABASE_URL']) return fail('DATABASE_DRIVER');
+  if (
+    typedMode === 'production' &&
+    databaseDriver === 'sqlite' &&
+    !env['DB_PATH']
+  )
+    return fail('DB_PATH');
   const paths = {
     dbPath: absolute(
       env['DB_PATH'],
@@ -328,6 +368,9 @@ export function loadConfig(
     port,
     publicOrigin,
     ...paths,
+    databaseDriver: databaseDriver as 'sqlite' | 'postgres',
+    ...(databaseUrl ? { databaseUrl } : {}),
+    ...(databaseDriver === 'postgres' ? { databaseSchema } : {}),
     tls,
     authMode: authMode as AuthMode,
     ...(jAuth ? { jAuth } : {}),

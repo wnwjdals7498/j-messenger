@@ -9,7 +9,7 @@ import type {
   SystemContext,
   TxContext,
 } from '@j-messenger/contracts';
-import type { Database } from '../../platform/database/index.js';
+import { asStorage, type StorageInput } from '../../platform/storage/index.js';
 import type { FilesService } from '../files/index.js';
 
 export interface RetentionProgress {
@@ -18,7 +18,7 @@ export interface RetentionProgress {
   readonly complete: boolean;
 }
 export interface RetentionOptions {
-  readonly db: Database;
+  readonly db: StorageInput;
   readonly clock: Clock;
   readonly files: FilesService;
   readonly audit: AuditWriter;
@@ -31,12 +31,14 @@ export interface RetentionOptions {
     cutoff: string,
     afterId: string,
     limit: number,
-  ) => { processed: number; lastId: string; hasMore: boolean };
+  ) =>
+    | { processed: number; lastId: string; hasMore: boolean }
+    | Promise<{ processed: number; lastId: string; hasMore: boolean }>;
   readonly eventExpiredFile: (
     tx: TxContext,
     context: SystemContext,
     fileId: string,
-  ) => void;
+  ) => void | Promise<void>;
   readonly policyRoutesEnabled?: boolean;
 }
 const defaultPolicy: RetentionPolicy = {
@@ -71,12 +73,13 @@ export function createRetentionService(
     limit: number,
   ): Promise<RetentionProgress>;
 } {
-  const policy = (serverId: string): RetentionPolicy => {
-    const row = options.db
+  const db = asStorage(options.db);
+  const policy = async (serverId: string): Promise<RetentionPolicy> => {
+    const row = (await db
       .prepare(
         'SELECT message_days,file_days,version FROM retention_policies WHERE server_id=?',
       )
-      .get(serverId) as
+      .get(serverId)) as
       { message_days: bigint; file_days: bigint; version: bigint } | undefined;
     return row
       ? {
@@ -99,12 +102,12 @@ export function createRetentionService(
       throw new DomainError('forbidden');
     }
   };
-  const progress = (serverId: string, kind: 'messages' | 'files') =>
-    options.db
+  const progress = async (serverId: string, kind: 'messages' | 'files') =>
+    (await db
       .prepare(
         'SELECT last_id,cutoff_at,policy_version FROM retention_progress WHERE server_id=? AND kind=?',
       )
-      .get(serverId, kind) as
+      .get(serverId, kind)) as
       | {
           last_id: string | null;
           cutoff_at: string | null;
@@ -114,7 +117,7 @@ export function createRetentionService(
   return {
     async get(context) {
       await authorize(context);
-      return policy(context.serverId);
+      return await policy(context.serverId);
     },
     async update(context, next) {
       await authorize(context);
@@ -125,10 +128,10 @@ export function createRetentionService(
         next.fileDays !== 14
       )
         throw new DomainError('bad_request');
-      await options.db.run((tx) => {
-        const old = policy(context.serverId);
+      await db.run(async (tx) => {
+        const old = await policy(context.serverId);
         const version = old.version + 1;
-        options.db
+        await db
           .prepare(
             'INSERT INTO retention_policies(server_id,message_days,file_days,version,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(server_id) DO UPDATE SET message_days=excluded.message_days,file_days=excluded.file_days,version=excluded.version,updated_at=excluded.updated_at',
           )
@@ -139,7 +142,7 @@ export function createRetentionService(
             version,
             options.clock.now().toISOString(),
           );
-        options.audit.append(tx, context, {
+        await options.audit.append(tx, context, {
           action: 'retention.policy.updated',
           targetId: null,
           metadata: {
@@ -166,12 +169,12 @@ export function createRetentionService(
         throw new DomainError('forbidden');
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
         throw new DomainError('bad_request');
-      const result = await options.db.run((tx) => {
+      const result = await db.run(async (tx) => {
         const sys: SystemContext = {
           serverId: context.serverId,
           requestId: context.requestId,
         };
-        return processBatch(tx, sys, limit);
+        return await processBatch(tx, sys, limit);
       });
       emit(options, 'retention.batch.completed', 'success', context, {
         serverId: context.serverId,
@@ -188,8 +191,8 @@ export function createRetentionService(
         limit > 100
       )
         throw new DomainError('bad_request');
-      const result = await options.db.run((tx) =>
-        processBatch(tx, context, limit),
+      const result = await db.run(
+        async (tx) => await processBatch(tx, context, limit),
       );
       emit(options, 'retention.batch.completed', 'success', context, {
         serverId: context.serverId,
@@ -200,16 +203,19 @@ export function createRetentionService(
     },
   };
 
-  function processBatch(
+  async function processBatch(
     tx: TxContext,
     context: SystemContext,
     limit: number,
-  ): RetentionProgress {
-    options.db.assertOwn(tx);
-    const current = policy(context.serverId),
+  ): Promise<RetentionProgress> {
+    db.assertOwn(tx);
+    const current = await policy(context.serverId),
       now = options.clock.now();
-    const getCursor = (kind: 'messages' | 'files', retentionDays: number) => {
-      const old = progress(context.serverId, kind);
+    const getCursor = async (
+      kind: 'messages' | 'files',
+      retentionDays: number,
+    ) => {
+      const old = await progress(context.serverId, kind);
       if (
         old &&
         Number(old.policy_version) === current.version &&
@@ -221,12 +227,12 @@ export function createRetentionService(
         cutoff: new Date(now.getTime() - days(retentionDays)).toISOString(),
       };
     };
-    const write = (
+    const write = async (
       kind: 'messages' | 'files',
       lastId: string,
       cutoff: string,
     ) =>
-      options.db
+      await db
         .prepare(
           'INSERT INTO retention_progress(server_id,kind,last_id,cutoff_at,policy_version,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(server_id,kind) DO UPDATE SET last_id=excluded.last_id,cutoff_at=excluded.cutoff_at,policy_version=excluded.policy_version,updated_at=excluded.updated_at',
         )
@@ -238,23 +244,23 @@ export function createRetentionService(
           current.version,
           now.toISOString(),
         );
-    const mc = getCursor('messages', current.messageDays),
-      messageResult = options.purgeMessages(
+    const mc = await getCursor('messages', current.messageDays),
+      messageResult = await options.purgeMessages(
         tx,
         context,
         mc.cutoff,
         mc.after,
         limit,
       );
-    write(
+    await write(
       'messages',
       messageResult.hasMore ? messageResult.lastId : '0',
       messageResult.hasMore
         ? mc.cutoff
         : new Date(now.getTime() - days(current.messageDays)).toISOString(),
     );
-    const fc = getCursor('files', current.fileDays),
-      fileResult = options.files.expireBatch(
+    const fc = await getCursor('files', current.fileDays),
+      fileResult = await options.files.expireBatch(
         tx,
         context,
         fc.cutoff,
@@ -262,8 +268,8 @@ export function createRetentionService(
         limit,
       );
     for (const fileId of fileResult.fileIds)
-      options.eventExpiredFile(tx, context, fileId);
-    write(
+      await options.eventExpiredFile(tx, context, fileId);
+    await write(
       'files',
       fileResult.hasMore ? fileResult.lastId : '0',
       fileResult.hasMore

@@ -262,7 +262,7 @@ describe('sync module', () => {
       cursorCodec: codec,
       clock,
     });
-    const prior = service.initialCursor(context);
+    const prior = await service.initialCursor(context);
     await db.run((tx) => db.rotateStreamEpoch(tx));
     await expect(
       service.sync(context, { after: prior, limit: 10 }),

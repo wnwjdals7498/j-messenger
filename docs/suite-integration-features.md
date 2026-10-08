@@ -1,6 +1,6 @@
 # j-messenger 제품군 연결 기능 목록
 
-j-messenger를 j-groupware 제품군에 연결하기 위해 추가·변경해야 하는 기능 목록이다. 기존 메신저 기능(대화, outbox+WSS 등)은 `docs/pmt-docs/09-feature-list.md`를 따르고 새 기능은 만들지 않는다. 근거는 `j-groupware/docs/decisions.md` 결정 9와 `j-groupware/docs/architecture.md`의 S 번호이고, 담당 Item은 PMT 통합 project 분류 `j-messenger`의 M1~M5다. M1(MS-02~04)은 [클라우드 실제 검증](cloud-j-auth-verification-2026-10-08.md)을 완료했고 M5/M2/M3/M4는 후속이다. 기존 SQLite 기반 메시징 검증을 PostgreSQL 인수로 표시하지 않는다.
+j-messenger를 j-groupware 제품군에 연결하기 위해 추가·변경해야 하는 기능 목록이다. 기존 메신저 기능(대화, outbox+WSS 등)은 `docs/pmt-docs/09-feature-list.md`를 따르고 새 기능은 만들지 않는다. 근거는 `j-groupware/docs/decisions.md` 결정 9와 `j-groupware/docs/architecture.md`의 S 번호이고, 담당 Item은 PMT 통합 project 분류 `j-messenger`의 M1~M5다. M1(MS-02~04)은 [클라우드 실제 검증](cloud-j-auth-verification-2026-10-08.md)을 완료했고 M5는 [격리 PostgreSQL 검증](cloud-postgres-verification-2026-10-08.md)을 완료했고 M2/M3/M4는 후속이다. 기존 SQLite 증거와 실제 PG 증거를 구분한다.
 
 화면은 j-groupware "메신저" 메뉴(GW-30)가 이 저장소의 client 패키지로 그린다.
 

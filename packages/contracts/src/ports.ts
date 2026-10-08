@@ -76,12 +76,12 @@ export interface ConversationAccess {
     context: RequestContext,
     conversationId: DecimalId,
   ): Promise<void>;
-  /** Recheck authorization synchronously inside the caller's transaction. */
+  /** Recheck authorization inside the caller's owned transaction. */
   recheckMember(
     tx: TxContext,
     context: RequestContext,
     conversationId: DecimalId,
-  ): void;
+  ): void | Promise<void>;
   canAccess(
     context: RequestContext,
     conversationId: DecimalId,
@@ -101,11 +101,11 @@ export interface ConversationActivity {
     context: RequestContext,
     conversationId: DecimalId,
     occurredAt: string,
-  ): void;
+  ): void | Promise<void>;
   memberIds(
     context: RequestContext,
     conversationId: DecimalId,
-  ): readonly DecimalId[];
+  ): readonly DecimalId[] | Promise<readonly DecimalId[]>;
 }
 export type UserSummary = UserDto;
 export interface ConversationQueries {
@@ -149,7 +149,7 @@ export interface Page<T> {
 }
 
 export interface EventWriter {
-  append(tx: TxContext, event: EventAppend): DecimalId;
+  append(tx: TxContext, event: EventAppend): DecimalId | Promise<DecimalId>;
 }
 export interface EventAppend {
   readonly type: string;
@@ -173,7 +173,10 @@ export interface EventAppend {
 }
 export type EntityReference = DecimalId | Uuid;
 export interface EventReader {
-  snapshotPosition(tx: TxContext, context: RequestContext): PositionId;
+  snapshotPosition(
+    tx: TxContext,
+    context: RequestContext,
+  ): PositionId | Promise<PositionId>;
   highWatermark(context: RequestContext): Promise<PositionId>;
   /** `through` is fixed for the paging run; scannedThrough advances over hidden as well as visible rows. */
   scan(
@@ -269,12 +272,16 @@ export interface FileCommands {
     conversationId: DecimalId,
     messageId: DecimalId,
     fileIds: readonly Uuid[],
-  ): void;
+  ): void | Promise<void>;
   openDownload(
     context: RequestContext,
     fileId: Uuid,
   ): Promise<{ descriptor: FileDescriptor; stream: AsyncIterable<Uint8Array> }>;
-  scheduleDelete(tx: TxContext, fileId: Uuid, reasonCode: string): void;
+  scheduleDelete(
+    tx: TxContext,
+    fileId: Uuid,
+    reasonCode: string,
+  ): void | Promise<void>;
 }
 export type FileDescriptor = FileDto;
 
@@ -307,7 +314,7 @@ export interface AuditWriter {
       targetId: EntityReference | null;
       metadata: Readonly<Record<string, string | number | boolean | null>>;
     },
-  ): void;
+  ): void | Promise<void>;
 }
 
 export interface ClientTransport {

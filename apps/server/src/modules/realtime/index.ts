@@ -10,14 +10,15 @@ import {
 } from '@j-messenger/contracts';
 import { requireContext, routeConfig } from '../../platform/http/index.js';
 import type { AppConfig } from '../../platform/config/index.js';
-import type { Database } from '../../platform/database/index.js';
+import { asStorage } from '../../platform/storage/index.js';
+import type { StorageInput } from '../../platform/storage/index.js';
 import type { SyncService } from '../sync/index.js';
 
 interface ActiveSessionResolver extends SessionResolver {
-  sessionActive(context: RequestContext): boolean;
+  sessionActive(context: RequestContext): boolean | Promise<boolean>;
 }
 export interface RealtimeOptions {
-  readonly db: Database;
+  readonly db: StorageInput;
   readonly config: AppConfig;
   readonly resolver: ActiveSessionResolver;
   readonly sync: SyncService;
@@ -48,6 +49,7 @@ export interface RealtimeService {
 export function createRealtimeService(
   options: RealtimeOptions,
 ): RealtimeService {
+  const db = asStorage(options.db);
   const peers = new Set<Peer>();
   const pollMs = options.pollMs ?? 250;
   const heartbeatMs = options.heartbeatMs ?? 25_000;
@@ -127,7 +129,7 @@ export function createRealtimeService(
   };
   const pollPeer = async (peer: Peer): Promise<void> => {
     if (peer.closed || peer.paused) return;
-    if (!options.resolver.sessionActive(peer.context)) {
+    if (!(await options.resolver.sessionActive(peer.context))) {
       closePeer(peer, 'session_revoked', 4001);
       return;
     }
@@ -139,9 +141,9 @@ export function createRealtimeService(
       closePeer(peer, 'backpressure', 1013);
       return;
     }
-    const through = await options.db.eventReader.highWatermark(peer.context);
+    const through = await db.eventReader.highWatermark(peer.context);
     if (BigInt(through) <= BigInt(peer.position)) return;
-    const page = await options.db.eventReader.scan(
+    const page = await db.eventReader.scan(
       peer.context,
       peer.position,
       through,
@@ -177,8 +179,14 @@ export function createRealtimeService(
     scope.get(
       options.path ?? '/api/v1/events',
       { websocket: true, config: routeConfig('authRequired') },
-      (socket: WebSocket, request: FastifyRequest) => {
+      async (socket: WebSocket, request: FastifyRequest) => {
         const context = requireContext(request);
+        let sessionActive = false;
+        try {
+          sessionActive = await options.resolver.sessionActive(context);
+        } catch {
+          sessionActive = false;
+        }
         const cookiePresented = typeof request.cookies?.jm_session === 'string';
         const bearerPresented = request.headers.authorization !== undefined;
         const origin = request.headers.origin;
@@ -193,7 +201,7 @@ export function createRealtimeService(
           originDenied ||
           credentialInQuery ||
           cookiePresented === bearerPresented ||
-          !options.resolver.sessionActive(context)
+          !sessionActive
         ) {
           emit(undefined, 'realtime.connection.rejected', 'rejected', {
             serverId: context.serverId,

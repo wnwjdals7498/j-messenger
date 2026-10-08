@@ -13,6 +13,10 @@ import {
   PLATFORM_MIGRATION,
 } from '../../src/platform/database/index.js';
 import type { Database } from '../../src/platform/database/index.js';
+import {
+  asStorage,
+  type StorageDatabase,
+} from '../../src/platform/storage/index.js';
 import { createLogger } from '../../src/platform/logging/index.js';
 import {
   JOB_MIGRATION,
@@ -39,6 +43,7 @@ class TestIds implements IdFactory {
 describe('persistent job platform', () => {
   let dir: string;
   let db: Database;
+  let storage: StorageDatabase;
   let clock: TestClock;
   let ids: TestIds;
   let store: JobStore;
@@ -47,6 +52,7 @@ describe('persistent job platform', () => {
     clock = new TestClock();
     ids = new TestIds();
     db = createDatabase(path.join(dir, 'jobs.sqlite'), { migrations, clock });
+    storage = asStorage(db);
     store = new JobStore(db, { clock, idFactory: ids });
   });
   afterEach(async () => {
@@ -54,43 +60,46 @@ describe('persistent job platform', () => {
     await rm(dir, { recursive: true, force: true });
   });
   const enqueue = (payload: unknown, extras: Record<string, unknown> = {}) =>
-    db.run((tx) =>
-      store.enqueue(tx, {
-        kind: 'mail.cleanup',
-        payload,
-        serverId: 'srv',
-        ...extras,
-      } as Parameters<JobStore['enqueue']>[1]),
+    storage.run(
+      async (tx) =>
+        await store.enqueue(tx, {
+          kind: 'mail.cleanup',
+          payload,
+          serverId: 'srv',
+          ...extras,
+        } as Parameters<JobStore['enqueue']>[1]),
     );
 
   it('deduplicates identical references and rejects a changed payload; commit and rollback are atomic with consumer progress', async () => {
     let id = '';
-    await db.run((tx) => {
-      id = store.enqueue(tx, {
+    await storage.run(async (tx) => {
+      id = await store.enqueue(tx, {
         kind: 'mail.cleanup',
         payload: { b: 2, a: 1 },
         serverId: 'srv',
         dedupKey: 'key',
       });
-      db.advanceConsumerPosition(tx, 'notifications', '7');
+      await storage.advanceConsumerPosition(tx, 'notifications', '7');
     });
     expect(await enqueue({ a: 1, b: 2 }, { dedupKey: 'key' })).toBe(id);
     await expect(enqueue({ a: 9 }, { dedupKey: 'key' })).rejects.toThrow();
     expect(db.getConsumerPosition('notifications')).toBe('7');
     let rolled = '';
     await expect(
-      db.run((tx) => {
-        rolled = store.enqueue(tx, {
+      storage.run(async (tx) => {
+        rolled = await store.enqueue(tx, {
           kind: 'mail.cleanup',
           payload: {},
           serverId: 'srv',
         });
-        db.advanceConsumerPosition(tx, 'notifications', '8');
+        await storage.advanceConsumerPosition(tx, 'notifications', '8');
         throw Error('rollback');
       }),
     ).rejects.toThrow('rollback');
     expect(db.getConsumerPosition('notifications')).toBe('7');
-    await db.run((tx) => expect(store.get(tx, rolled)).toBeNull());
+    await storage.run(async (tx) =>
+      expect(await store.get(tx, rolled)).toBeNull(),
+    );
   });
 
   it('claims once across two runners and executes handlers outside the transaction', async () => {
@@ -146,32 +155,37 @@ describe('persistent job platform', () => {
     expect(
       db.prepare('SELECT count(*) AS n FROM handler_effects').get()!.n,
     ).toBe(1n);
-    await db.run((tx) => expect(store.get(tx, id)?.status).toBe('completed'));
+    await storage.run(async (tx) =>
+      expect((await store.get(tx, id))?.status).toBe('completed'),
+    );
   });
 
   it('reclaims only expired leases after restart and rejects the former owner acknowledgement', async () => {
     const id = await enqueue({ ref: '1' });
     const owner1 = ids.uuid();
-    await db.run((tx) =>
-      expect(store.claim(tx, owner1, 5000, 10)?.attempt).toBe(1),
+    await storage.run(async (tx) =>
+      expect((await store.claim(tx, owner1, 5000, 10))?.attempt).toBe(1),
     );
     db.close();
     db = createDatabase(path.join(dir, 'jobs.sqlite'), { migrations, clock });
+    storage = asStorage(db);
     store = new JobStore(db, { clock, idFactory: ids });
     const owner2 = ids.uuid();
-    await db.run((tx) => expect(store.claim(tx, owner2, 5000, 10)).toBeNull());
+    await storage.run(async (tx) =>
+      expect(await store.claim(tx, owner2, 5000, 10)).toBeNull(),
+    );
     clock.advance(5001);
-    let reclaimed!: ReturnType<(typeof store)['claim']>;
-    await db.run((tx) => {
-      reclaimed = store.claim(tx, owner2, 5000, 10);
+    let reclaimed!: Awaited<ReturnType<(typeof store)['claim']>>;
+    await storage.run(async (tx) => {
+      reclaimed = await store.claim(tx, owner2, 5000, 10);
     });
     expect(reclaimed?.id).toBe(id);
     expect(reclaimed?.attempt).toBe(2);
-    await db.run((tx) =>
-      expect(store.complete(tx, reclaimed!, owner1)).toBe(false),
+    await storage.run(async (tx) =>
+      expect(await store.complete(tx, reclaimed!, owner1)).toBe(false),
     );
-    await db.run((tx) =>
-      expect(store.complete(tx, reclaimed!, owner2)).toBe(true),
+    await storage.run(async (tx) =>
+      expect(await store.complete(tx, reclaimed!, owner2)).toBe(true),
     );
   });
 
@@ -201,8 +215,8 @@ describe('persistent job platform', () => {
       const result = await runner.runBatch(1);
       if (attempt < 10) {
         expect(result.retried).toBe(1);
-        await db.run((tx) =>
-          expect(store.get(tx, id)?.nextRunAt).toBe(
+        await storage.run(async (tx) =>
+          expect((await store.get(tx, id))?.nextRunAt).toBe(
             new Date(
               clock.now().getTime() +
                 Math.min(300_000, 1000 * 2 ** (attempt - 1)),
@@ -212,17 +226,17 @@ describe('persistent job platform', () => {
         clock.advance(Math.min(300_000, 1000 * 2 ** (attempt - 1)));
       } else expect(result.failed).toBe(1);
     }
-    await db.run((tx) =>
-      expect(store.get(tx, id)).toMatchObject({
+    await storage.run(async (tx) =>
+      expect(await store.get(tx, id)).toMatchObject({
         id,
         status: 'failed',
         attempt: 10,
         reasonCode: 'max_attempts',
       }),
     );
-    await db.run((tx) => store.resume(tx, id));
-    await db.run((tx) =>
-      expect(store.get(tx, id)).toMatchObject({
+    await storage.run(async (tx) => store.resume(tx, id));
+    await storage.run(async (tx) =>
+      expect(await store.get(tx, id)).toMatchObject({
         id,
         status: 'pending',
         attempt: 0,
@@ -251,7 +265,7 @@ describe('persistent job platform', () => {
         return { status: 'completed' };
       },
     };
-    await db.run((tx) => store.resume(tx, id));
+    await storage.run(async (tx) => store.resume(tx, id));
     const runner = createJobRunner({
       db,
       store,
@@ -274,12 +288,13 @@ describe('persistent job platform', () => {
       sink: (record) => records.push(record),
     });
     store = new JobStore(db, { clock, idFactory: ids, logger });
-    await db.run((tx) =>
-      store.enqueue(tx, {
-        kind: 'mail.cleanup',
-        payload: { body: 'sensitive-payload' },
-        serverId: 'srv',
-      }),
+    await storage.run(
+      async (tx) =>
+        await store.enqueue(tx, {
+          kind: 'mail.cleanup',
+          payload: { body: 'sensitive-payload' },
+          serverId: 'srv',
+        }),
     );
     const handler: JobHandler = {
       kind: 'mail.cleanup',
@@ -343,8 +358,8 @@ describe('persistent job platform', () => {
       retried: 1,
       failed: 0,
     });
-    await db.run((tx) =>
-      expect(store.get(tx, id)).toMatchObject({
+    await storage.run(async (tx) =>
+      expect(await store.get(tx, id)).toMatchObject({
         status: 'pending',
         attempt: 1,
         reasonCode: 'handler_error',

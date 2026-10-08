@@ -16,6 +16,63 @@ afterEach(() => {
 });
 
 describe('loadConfig', () => {
+  it('selects a dedicated local PostgreSQL store and rejects unsafe or mixed profiles without exposing credentials', () => {
+    const base = baseDir();
+    const env = {
+      DATABASE_DRIVER: 'postgres',
+      DATABASE_URL:
+        'postgresql://jgw_messenger:private-password@127.0.0.1:54240/jgw_messenger',
+      DATABASE_SCHEMA: 'messenger',
+    };
+    expect(loadConfig(env, base)).toMatchObject({
+      databaseDriver: 'postgres',
+      databaseSchema: 'messenger',
+      databaseUrl: env.DATABASE_URL,
+    });
+    expect(loadConfig({}, base).databaseDriver).toBe('sqlite');
+    for (const change of [
+      { DATABASE_DRIVER: 'unknown' },
+      { DATABASE_DRIVER: 'sqlite' },
+      { DATABASE_URL: '' },
+      {
+        DATABASE_URL:
+          'postgresql://jgw_messenger:private-password@outside.test/jgw_messenger',
+      },
+      {
+        DATABASE_URL:
+          'postgresql://jgw_messenger:private-password@127.0.0.1:3001/jgw_messenger',
+      },
+      {
+        DATABASE_URL:
+          'postgresql://jgw_messenger:private-password@127.0.0.1/jgw_auth',
+      },
+      { DATABASE_SCHEMA: 'unsafe; DROP SCHEMA public' },
+    ]) {
+      try {
+        loadConfig({ ...env, ...change }, base);
+        throw new Error('configuration should fail');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConfigError);
+        expect(String(error)).not.toContain('private-password');
+      }
+    }
+    expect(
+      loadConfig(
+        {
+          ...env,
+          NODE_ENV: 'production',
+          AUTH_MODE: 'j-auth',
+          JAUTH_TENANT: 'sample-a',
+          KC_PUBLIC_URL: 'https://auth.jgw.test',
+          PUBLIC_ORIGIN: 'https://messenger.jgw.test',
+          TLS_CERT_PATH: path.join(base, 'cert.pem'),
+          TLS_KEY_PATH: path.join(base, 'key.pem'),
+          CURSOR_SIGNING_KEY: 'x'.repeat(32),
+        },
+        base,
+      ).databaseDriver,
+    ).toBe('postgres');
+  });
   it('requires a fixed customer tenant and HTTPS Keycloak origin for j-auth without mail or native login', () => {
     const env = {
       AUTH_MODE: 'j-auth',

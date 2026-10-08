@@ -13,7 +13,8 @@ import {
   type RequestContext,
   type SyncResponse,
 } from '@j-messenger/contracts';
-import type { Database } from '../../platform/database/index.js';
+import { asStorage } from '../../platform/storage/index.js';
+import type { StorageInput } from '../../platform/storage/index.js';
 
 const MAX_SQLITE_ID = 9_223_372_036_854_775_807n;
 const decimal = (value: string): boolean =>
@@ -114,7 +115,7 @@ export function createCursorCodec(
 }
 
 export interface SyncOptions {
-  readonly db: Database;
+  readonly db: StorageInput;
   readonly reader?: EventReader;
   readonly hydrator: EventHydrator;
   readonly cursorCodec: OpaqueCursorCodec;
@@ -125,7 +126,7 @@ export interface SyncOptions {
 }
 export interface SyncService {
   ready(context: RequestContext): Promise<ReadyFrame>;
-  initialCursor(context: RequestContext): string;
+  initialCursor(context: RequestContext): Promise<string>;
   sync(
     context: RequestContext,
     input: { after: string | null; through?: string; limit: number },
@@ -135,7 +136,8 @@ const compare = (a: string, b: string): number =>
   a.length === b.length ? (a < b ? -1 : a > b ? 1 : 0) : a.length - b.length;
 
 export function createSyncService(options: SyncOptions): SyncService {
-  const reader = options.reader ?? options.db.eventReader;
+  const db = asStorage(options.db);
+  const reader = options.reader ?? db.eventReader;
   const days = options.cursorDays ?? 7;
   const scanLimit = options.scanLimit ?? 1000;
   if (
@@ -147,30 +149,31 @@ export function createSyncService(options: SyncOptions): SyncService {
     scanLimit > 5000
   )
     throw new TypeError('invalid sync limits');
-  const epoch = (): string => options.db.getStreamMetadata().epoch;
-  const encode = (
+  const epoch = async (): Promise<string> =>
+    (await db.getStreamMetadata()).epoch;
+  const encode = async (
     context: RequestContext,
     position: string,
-    streamEpoch = epoch(),
-  ): string =>
+    streamEpoch?: string,
+  ): Promise<string> =>
     options.cursorCodec.encode({
       serverId: context.serverId,
       userId: context.userId,
-      epoch: streamEpoch,
+      epoch: streamEpoch ?? (await epoch()),
       position: position as PositionId,
       expiresAt: new Date(
         options.clock.now().getTime() + days * 86_400_000,
       ).toISOString(),
     });
-  const decode = (
+  const decode = async (
     context: RequestContext,
     token: string,
-    streamEpoch = epoch(),
-  ): string =>
+    streamEpoch?: string,
+  ): Promise<string> =>
     options.cursorCodec.decode(token, {
       serverId: context.serverId,
       userId: context.userId,
-      epoch: streamEpoch,
+      epoch: streamEpoch ?? (await epoch()),
       now: options.clock.now(),
     }).position;
   const log = (
@@ -193,16 +196,17 @@ export function createSyncService(options: SyncOptions): SyncService {
   };
   return {
     async ready(context) {
-      const initialEpoch = epoch();
+      const initialEpoch = await epoch();
       const position = await reader.highWatermark(context);
-      if (epoch() !== initialEpoch) throw new SyncError('sync_reset_required');
+      if ((await epoch()) !== initialEpoch)
+        throw new SyncError('sync_reset_required');
       return {
         type: 'ready',
-        cursor: encode(context, position, initialEpoch),
+        cursor: await encode(context, position, initialEpoch),
         position: position as PositionId,
       };
     },
-    initialCursor(context) {
+    async initialCursor(context) {
       return encode(context, '0');
     },
     async sync(context, input) {
@@ -213,28 +217,30 @@ export function createSyncService(options: SyncOptions): SyncService {
         input.limit > 100
       )
         throw new SyncError('bad_request');
-      const startEpoch = epoch();
+      const startEpoch = await epoch();
       let after: string;
       let through: string;
       let throughPosition: string;
       try {
         after =
-          input.after === null ? '0' : decode(context, input.after, startEpoch);
+          input.after === null
+            ? '0'
+            : await decode(context, input.after, startEpoch);
         if (input.through === undefined) {
           throughPosition = await reader.highWatermark(context);
-          if (epoch() !== startEpoch)
+          if ((await epoch()) !== startEpoch)
             throw new SyncError('sync_reset_required');
-          through = encode(context, throughPosition, startEpoch);
+          through = await encode(context, throughPosition, startEpoch);
         } else {
           through = input.through;
-          throughPosition = decode(context, through, startEpoch);
+          throughPosition = await decode(context, through, startEpoch);
         }
       } catch (error) {
         if (error instanceof SyncError) throw error;
         if (error instanceof DomainError) throw error;
         throw new SyncError('bad_request');
       }
-      const meta = options.db.getStreamMetadata();
+      const meta = await db.getStreamMetadata();
       if (meta.epoch !== startEpoch) throw new SyncError('sync_reset_required');
       if (
         !decimal(after) ||
@@ -270,7 +276,7 @@ export function createSyncService(options: SyncOptions): SyncService {
           break;
         }
       }
-      if (options.db.getStreamMetadata().epoch !== startEpoch)
+      if ((await db.getStreamMetadata()).epoch !== startEpoch)
         throw new SyncError('sync_reset_required');
       // EventReader scans a bounded raw range. Cursor advances through hidden rows even when data is empty.
       const scannedThrough =
@@ -278,7 +284,7 @@ export function createSyncService(options: SyncOptions): SyncService {
           ? stoppedAt
           : scanned.scannedThrough;
       const hasMore = remainingRows || scanned.hasMore;
-      const nextCursor = encode(context, scannedThrough, startEpoch);
+      const nextCursor = await encode(context, scannedThrough, startEpoch);
       log(context, 'sync.page.completed', 'success', {
         count: data.length,
         processedCount: scanned.rows.length,

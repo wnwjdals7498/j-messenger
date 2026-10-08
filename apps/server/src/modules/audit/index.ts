@@ -9,7 +9,7 @@ import type {
   TxContext,
   Uuid,
 } from '@j-messenger/contracts';
-import type { Database } from '../../platform/database/index.js';
+import { asStorage, type StorageInput } from '../../platform/storage/index.js';
 
 export interface AuditRecord {
   readonly id: string;
@@ -25,7 +25,7 @@ export interface AuditPage {
   readonly nextCursor: string | null;
 }
 export interface AuditOptions {
-  readonly db: Database;
+  readonly db: StorageInput;
   readonly clock: Clock;
   readonly logger?: FeatureLog;
   readonly authorizeAdmin?: (context: RequestContext) => Promise<boolean>;
@@ -110,9 +110,10 @@ export function createAuditService(options: AuditOptions): AuditWriter & {
       targetId: EntityReference | null;
       metadata: Readonly<Record<string, string | number | boolean | null>>;
     },
-  ): void;
+  ): Promise<void>;
 } {
-  const appendRow = (
+  const db = asStorage(options.db);
+  const appendRow = async (
     tx: TxContext,
     serverId: string,
     actorId: string | null,
@@ -122,13 +123,13 @@ export function createAuditService(options: AuditOptions): AuditWriter & {
       targetId: EntityReference | null;
       metadata: Readonly<Record<string, string | number | boolean | null>>;
     },
-  ) => {
-    options.db.assertOwn(tx);
+  ): Promise<void> => {
+    db.assertOwn(tx);
     if (!/^[a-z0-9-]{1,32}$/.test(serverId) || !safeAction(event.action))
       throw new DomainError('bad_request');
     const metadata = cleanMetadata(event.metadata),
       now = options.clock.now().toISOString();
-    options.db
+    await db
       .prepare(
         'INSERT INTO audit_events(server_id,actor_id,action,target_id,outcome,metadata_json,request_id,occurred_at) VALUES(?,?,?,?,?,?,?,?)',
       )
@@ -142,7 +143,7 @@ export function createAuditService(options: AuditOptions): AuditWriter & {
         requestId,
         now,
       );
-    const id = options.db.lastInsertId();
+    const id = await db.lastInsertId();
     tx.afterCommit(() =>
       log(
         options,
@@ -159,11 +160,17 @@ export function createAuditService(options: AuditOptions): AuditWriter & {
     );
   };
   return {
-    append(tx, context, event) {
-      appendRow(tx, context.serverId, context.userId, context.requestId, event);
+    async append(tx, context, event) {
+      await appendRow(
+        tx,
+        context.serverId,
+        context.userId,
+        context.requestId,
+        event,
+      );
     },
-    appendSystem(tx, context, event) {
-      appendRow(tx, context.serverId, null, context.requestId, event);
+    async appendSystem(tx, context, event) {
+      await appendRow(tx, context.serverId, null, context.requestId, event);
     },
     async list(context, cursor, limit) {
       if (!options.authorizeAdmin || !(await options.authorizeAdmin(context))) {
@@ -177,7 +184,7 @@ export function createAuditService(options: AuditOptions): AuditWriter & {
         throw new DomainError('bad_request');
       if (cursor !== null && !/^[0-9]+$/.test(cursor))
         throw new DomainError('bad_request');
-      const rows = options.db
+      const rows = (await db
         .prepare(
           'SELECT id,action,target_id,outcome,metadata_json,request_id,occurred_at FROM audit_events WHERE server_id=? AND (? IS NULL OR id<?) ORDER BY id DESC LIMIT ?',
         )
@@ -186,7 +193,7 @@ export function createAuditService(options: AuditOptions): AuditWriter & {
           cursor === null ? null : BigInt(cursor),
           cursor === null ? null : BigInt(cursor),
           limit + 1,
-        ) as Array<Record<string, unknown>>;
+        )) as Array<Record<string, unknown>>;
       const page = rows.slice(0, limit),
         last = page.at(-1);
       const items = page.map((r) => ({
@@ -219,9 +226,9 @@ export function createAuditService(options: AuditOptions): AuditWriter & {
         limit > 1000
       )
         throw new DomainError('bad_request');
-      const purged = await options.db.run((tx) => {
-        options.db.assertOwn(tx);
-        const result = options.db
+      const purged = await db.run(async (tx) => {
+        db.assertOwn(tx);
+        const result = await db
           .prepare(
             'DELETE FROM audit_events WHERE id IN (SELECT id FROM audit_events WHERE server_id=? AND occurred_at<? ORDER BY id LIMIT ?)',
           )

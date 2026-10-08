@@ -10,7 +10,12 @@ import type {
   TxContext,
   Uuid,
 } from '@j-messenger/contracts';
-import type { Database, Migration } from '../database/index.js';
+import type { Migration } from '../database/index.js';
+import {
+  asStorage,
+  type StorageDatabase,
+  type StorageInput,
+} from '../storage/index.js';
 
 export const JOB_MIGRATION: Migration = Object.freeze({
   version: 2,
@@ -158,18 +163,18 @@ const emit = (
 };
 
 export class JobStore {
-  private readonly db: Database;
+  private readonly db: StorageDatabase;
   private readonly clock: Clock;
   private readonly ids: IdFactory;
   private readonly logger: FeatureLog | undefined;
-  constructor(db: Database, options: JobStoreOptions) {
-    this.db = db;
+  constructor(db: StorageInput, options: JobStoreOptions) {
+    this.db = asStorage(db);
     this.clock = options.clock;
     this.ids = options.idFactory;
     this.logger = options.logger;
   }
 
-  enqueue(tx: TxContext, input: EnqueueInput): Uuid {
+  async enqueue(tx: TxContext, input: EnqueueInput): Promise<Uuid> {
     this.db.assertOwn(tx);
     validateKind(input.kind);
     if (
@@ -193,11 +198,11 @@ export class JobStore {
     const hash = createHash('sha256').update(payload).digest('hex');
     const serverId = input.serverId ?? '';
     if (input.dedupKey !== undefined) {
-      const existing = this.db
+      const existing = (await this.db
         .prepare(
           'SELECT id,kind,payload_hash FROM platform_jobs WHERE server_id=? AND dedup_key=?',
         )
-        .get(serverId, input.dedupKey) as
+        .get(serverId, input.dedupKey)) as
         { id: Uuid; kind: string; payload_hash: string } | undefined;
       if (existing) {
         if (existing.kind !== input.kind || existing.payload_hash !== hash)
@@ -208,7 +213,7 @@ export class JobStore {
     const id = input.id ?? this.ids.uuid();
     if (!validUuid(id)) throw new TypeError('invalid job identifier');
     const now = iso(this.clock.now());
-    this.db
+    await this.db
       .prepare(
         `INSERT INTO platform_jobs(id,server_id,kind,payload_json,payload_hash,request_id,dedup_key,status,attempt,next_run_at,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,'pending',0,?,?,?)`,
@@ -228,18 +233,18 @@ export class JobStore {
     return id;
   }
 
-  get(tx: TxContext, id: Uuid): StoredJob | null {
+  async get(tx: TxContext, id: Uuid): Promise<StoredJob | null> {
     this.db.assertOwn(tx);
-    const row = this.db
+    const row = (await this.db
       .prepare('SELECT * FROM platform_jobs WHERE id=?')
-      .get(id) as JobRow | undefined;
+      .get(id)) as JobRow | undefined;
     return row ? mapJob(row) : null;
   }
 
-  resume(tx: TxContext, id: Uuid): void {
+  async resume(tx: TxContext, id: Uuid): Promise<void> {
     this.db.assertOwn(tx);
     const now = iso(this.clock.now());
-    const result = this.db
+    const result = await this.db
       .prepare(
         "UPDATE platform_jobs SET status='pending',attempt=0,next_run_at=?,lease_owner=NULL,lease_until=NULL,reason_code=NULL,updated_at=? WHERE id=? AND status='failed'",
       )
@@ -249,25 +254,25 @@ export class JobStore {
     tx.afterCommit(() => emit(this.logger, 'job.resumed', 'success', { id }));
   }
 
-  claim(
+  async claim(
     tx: TxContext,
     owner: Uuid,
     leaseMs: number,
     maxAttempts: number,
-  ): StoredJob | null {
+  ): Promise<StoredJob | null> {
     this.db.assertOwn(tx);
     const current = this.clock.now();
     const now = iso(current);
     const leaseUntil = iso(new Date(current.getTime() + leaseMs));
-    const row = this.db
+    const row = (await this.db
       .prepare(
         "SELECT * FROM platform_jobs WHERE (status='pending' AND next_run_at<=?) OR (status='running' AND lease_until<=?) ORDER BY next_run_at,created_at,id LIMIT 1",
       )
-      .get(now, now) as JobRow | undefined;
+      .get(now, now)) as JobRow | undefined;
     if (!row) return null;
     const attempt = Number(row.attempt) + 1;
     if (attempt > maxAttempts) {
-      this.db
+      await this.db
         .prepare(
           "UPDATE platform_jobs SET status='failed',attempt=?,lease_owner=NULL,lease_until=NULL,reason_code='max_attempts',updated_at=? WHERE id=?",
         )
@@ -290,7 +295,7 @@ export class JobStore {
         reason_code: 'max_attempts',
       });
     }
-    const changed = this.db
+    const changed = await this.db
       .prepare(
         "UPDATE platform_jobs SET status='running',attempt=?,lease_owner=?,lease_until=?,reason_code=NULL,updated_at=? WHERE id=? AND ((status='pending' AND next_run_at<=?) OR (status='running' AND lease_until<=?))",
       )
@@ -306,41 +311,41 @@ export class JobStore {
     });
   }
 
-  complete(tx: TxContext, job: StoredJob, owner: Uuid): boolean {
+  async complete(tx: TxContext, job: StoredJob, owner: Uuid): Promise<boolean> {
     this.db.assertOwn(tx);
     const now = iso(this.clock.now());
-    const changed = this.db
+    const changed = await this.db
       .prepare(
         "UPDATE platform_jobs SET status='completed',lease_owner=NULL,lease_until=NULL,reason_code=NULL,completed_at=?,updated_at=? WHERE id=? AND status='running' AND lease_owner=? AND lease_until>?",
       )
       .run(now, now, job.id, owner, now);
     return changed.changes !== 0 && changed.changes !== 0n;
   }
-  retry(
+  async retry(
     tx: TxContext,
     job: StoredJob,
     owner: Uuid,
     at: Date,
     reasonCode: string,
-  ): boolean {
+  ): Promise<boolean> {
     this.db.assertOwn(tx);
     const now = iso(this.clock.now());
-    const changed = this.db
+    const changed = await this.db
       .prepare(
         "UPDATE platform_jobs SET status='pending',next_run_at=?,lease_owner=NULL,lease_until=NULL,reason_code=?,updated_at=? WHERE id=? AND status='running' AND lease_owner=? AND lease_until>?",
       )
       .run(iso(at), reasonCode, now, job.id, owner, now);
     return changed.changes !== 0 && changed.changes !== 0n;
   }
-  fail(
+  async fail(
     tx: TxContext,
     job: StoredJob,
     owner: Uuid,
     reasonCode: string,
-  ): boolean {
+  ): Promise<boolean> {
     this.db.assertOwn(tx);
     const now = iso(this.clock.now());
-    const changed = this.db
+    const changed = await this.db
       .prepare(
         "UPDATE platform_jobs SET status='failed',lease_owner=NULL,lease_until=NULL,reason_code=?,updated_at=? WHERE id=? AND status='running' AND lease_owner=? AND lease_until>?",
       )
@@ -350,7 +355,7 @@ export class JobStore {
 }
 
 export interface JobRunnerOptions {
-  readonly db: Database;
+  readonly db: StorageInput;
   readonly store: JobStore;
   readonly clock: Clock;
   readonly idFactory: IdFactory;
@@ -376,6 +381,7 @@ export function createJobRunner(
     maxAttempts < 1
   )
     throw new TypeError('invalid job runner options');
+  const db = asStorage(options.db);
   const handlers = new Map<string, JobHandler>();
   for (const handler of options.handlers) {
     validateKind(handler.kind);
@@ -392,9 +398,9 @@ export function createJobRunner(
     attemptResult: 'retry' | 'failed',
     requestedAt?: string,
   ): Promise<boolean> =>
-    options.db.run((tx) => {
+    db.run(async (tx) => {
       if (attemptResult === 'failed')
-        return options.store.fail(tx, job, owner, code);
+        return await options.store.fail(tx, job, owner, code);
       const now = options.clock.now();
       const fallback = Math.min(
         300_000,
@@ -405,7 +411,7 @@ export function createJobRunner(
         ? parsed - now.getTime()
         : fallback;
       const delay = Math.max(1000, Math.min(300_000, requestedDelay));
-      return options.store.retry(
+      return await options.store.retry(
         tx,
         job,
         owner,
@@ -424,8 +430,9 @@ export function createJobRunner(
         retried = 0,
         failed = 0;
       for (let i = 0; i < limit && !stopped; i++) {
-        const job = await options.db.run((tx) =>
-          options.store.claim(tx, owner, leaseMs, maxAttempts),
+        const job = await db.run(
+          async (tx) =>
+            await options.store.claim(tx, owner, leaseMs, maxAttempts),
         );
         if (!job) break;
         if (job.status === 'failed') {
@@ -480,8 +487,8 @@ export function createJobRunner(
           clearTimeout(timeout!);
         }
         if (result.status === 'completed') {
-          const changed = await options.db.run((tx) =>
-            options.store.complete(tx, job, owner),
+          const changed = await db.run(
+            async (tx) => await options.store.complete(tx, job, owner),
           );
           if (changed) {
             completed++;

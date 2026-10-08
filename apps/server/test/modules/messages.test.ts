@@ -17,6 +17,7 @@ import {
   type Database,
 } from '../../src/platform/database/index.js';
 import { createLogger } from '../../src/platform/logging/index.js';
+import { asStorage } from '../../src/platform/storage/index.js';
 import { MIGRATIONS } from '../../src/bootstrap/migrations.js';
 import { createIdentityService } from '../../src/modules/identity/index.js';
 import { createConversationService } from '../../src/modules/conversations/index.js';
@@ -229,7 +230,7 @@ describe('messages module', () => {
     let live = true;
     const filePort: FilesPort = {
       bind(tx, ctx, convId, msgId, fileIds) {
-        db.assertOwn(tx);
+        asStorage(db).assertOwn(tx);
         void ctx;
         void convId;
         void msgId;
@@ -270,7 +271,9 @@ describe('messages module', () => {
         .fileIds,
     ).toEqual([]);
     clock.advance(9 * 86_400_000);
-    await db.run((tx) => service.expireFileReference(tx, system, fileId));
+    await asStorage(db).run((tx) =>
+      service.expireFileReference(tx, system, fileId),
+    );
     expect(
       db.prepare('SELECT count(*) AS count FROM messages').get()!.count,
     ).toBe(0n);
@@ -467,9 +470,9 @@ describe('messages module', () => {
       Buffer.from(bytes),
     );
     clock.advance(9 * 86_400_000 + 1);
-    await db.run((tx) => {
-      files.scheduleDelete(tx, file.id, 'retention_expired');
-      integrated.expireFileReference(tx, system, file.id);
+    await asStorage(db).run(async (tx) => {
+      await files.scheduleDelete(tx, file.id, 'retention_expired');
+      await integrated.expireFileReference(tx, system, file.id);
     });
     expect(
       db

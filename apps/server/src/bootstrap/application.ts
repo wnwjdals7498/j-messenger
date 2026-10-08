@@ -39,6 +39,8 @@ import type { AppConfig } from '../platform/config/index.js';
 import type { TokenVerifier } from '@j-auth/token-verifier';
 import { createLogger } from '../platform/logging/index.js';
 import { createDatabase } from '../platform/database/index.js';
+import { asStorage } from '../platform/storage/index.js';
+import { PostgresStorage } from '../platform/storage/postgres.js';
 import { JobStore, createJobRunner } from '../platform/jobs/index.js';
 import {
   createHttpServer,
@@ -79,17 +81,30 @@ export async function createApplication(
       clock,
     });
   for (const directory of [
-    path.dirname(config.dbPath),
+    ...(config.databaseDriver === 'sqlite'
+      ? [path.dirname(config.dbPath)]
+      : []),
     config.fileRoot,
     config.tempRoot,
     config.backupRoot,
   ])
     await mkdir(directory, { recursive: true });
-  const db = createDatabase(config.dbPath, {
-    migrations: MIGRATIONS,
-    clock,
-    logger,
-  });
+  const db =
+    config.databaseDriver === 'postgres'
+      ? await PostgresStorage.open({
+          connectionString: config.databaseUrl!,
+          schema: config.databaseSchema!,
+          clock,
+          logger,
+        })
+      : asStorage(
+          createDatabase(config.dbPath, {
+            migrations: MIGRATIONS,
+            clock,
+            logger,
+          }),
+          logger,
+        );
   try {
     const codec = createCursorCodec({ key: config.cursorSigningKey });
     const identity = await createIdentityService({
@@ -373,7 +388,7 @@ export async function createApplication(
             snapshotCursor: codec.encode({
               serverId: context.serverId,
               userId: context.userId,
-              epoch: db.getStreamMetadata().epoch,
+              epoch: (await db.getStreamMetadata()).epoch,
               position,
               expiresAt: new Date(
                 clock.now().getTime() + 7 * 86400000,
@@ -637,7 +652,7 @@ export async function createApplication(
       realtime.close();
       runner.stop();
       await app.close();
-      db.close();
+      await db.close();
     };
     return {
       app,
@@ -656,7 +671,7 @@ export async function createApplication(
       close,
     };
   } catch (error) {
-    db.close();
+    await db.close();
     throw error;
   }
 }

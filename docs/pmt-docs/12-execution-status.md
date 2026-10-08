@@ -57,3 +57,7 @@
 ## 2026-10-08 제품군 M1 클라우드 후속
 
 [실제 j-auth 인증 연결 기록](../cloud-j-auth-verification-2026-10-08.md)을 추가했다. MS-02~04 backend와 actual Keycloak HTTP/WSS를 검증했고 기존 mail/development-fixed 동작과 SQLite 데이터를 보존했다. M5 PostgreSQL·M2 client/BFF 업무 HTTP/UI·M3 전체 통합·M4 VM은 완료로 표시하지 않는다. 이번 클라우드에는 Windows PMT 상태/도구가 없어 그 기록만 미실행이고 저장소 증거를 유지했다.
+
+## 2026-10-08 제품군 M5 클라우드 후속
+
+[PostgreSQL 저장·SQLite 이관·실제 검증](../cloud-postgres-verification-2026-10-08.md)을 추가했다. 기존 SQLite 동기 저장과 4개 migration을 보존하고 업무 모듈을 async storage port로 연결했다. 실제 PostgreSQL15개와 actual Keycloak PG HTTP/WSS11개를 검증했다. 원본 파일 해시·첨부/커서·이관 실패 rollback·PG backup/restore도 확인했다. M2 client/BFF 업무 HTTP/UI·M3 전체 통합·M4 고객 VM은 완료로 표시하지 않는다. PMT 기록만 환경 경로/도구 부재로 미실행이다.

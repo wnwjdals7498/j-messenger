@@ -11,7 +11,8 @@ import {
 } from '@j-auth/token-verifier';
 import type { TokenVerifier } from '@j-auth/token-verifier';
 import type { AppConfig } from '../../platform/config/index.js';
-import type { Database } from '../../platform/database/index.js';
+import { asStorage } from '../../platform/storage/index.js';
+import type { StorageInput } from '../../platform/storage/index.js';
 import type {
   Clock,
   CurrentUserDto,
@@ -39,7 +40,7 @@ export interface MailAuthenticator {
   } | null>;
 }
 export interface IdentityOptions {
-  readonly db: Database;
+  readonly db: StorageInput;
   readonly config: AppConfig;
   readonly clock: Clock;
   readonly idFactory: IdFactory;
@@ -66,7 +67,7 @@ export interface IdentityService extends SessionResolver, UserDirectory {
   ): Promise<LoginResult>;
   get(context: RequestContext): Promise<CurrentUserDto>;
   logout(context: RequestContext): Promise<void>;
-  sessionActive(context: RequestContext): boolean;
+  sessionActive(context: RequestContext): Promise<boolean>;
 }
 export class IdentityError extends DomainError {
   constructor(
@@ -177,7 +178,8 @@ interface CursorClaims {
 export async function createIdentityService(
   options: IdentityOptions,
 ): Promise<IdentityService> {
-  const { db, config, clock } = options;
+  const db = asStorage(options.db);
+  const { config, clock } = options;
   if (config.mode === 'production' && config.authMode === 'development-fixed')
     throw new IdentityError('unavailable');
   if (
@@ -229,11 +231,13 @@ export async function createIdentityService(
   if (config.authMode === 'mail' && !options.authenticator) {
     /* service can still serve sessions; login reports unavailable */
   }
-  await db.run(() => {
+  await db.run(async () => {
     for (const server of servers)
-      db.prepare(
-        'INSERT INTO mail_servers(id,name) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name',
-      ).run(server.id, server.id);
+      await db
+        .prepare(
+          'INSERT INTO mail_servers(id,name) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name',
+        )
+        .run(server.id, server.id);
   });
   const jAuthSessions = new WeakMap<RequestContext, JAuthSession>();
   let nextJAuthSessionId = 0n;
@@ -243,23 +247,28 @@ export async function createIdentityService(
     server_id: string;
     display_name: string;
   }): CurrentUserDto => toUser(row, config);
-  const sessionRow = (context: RequestContext): SessionRow | undefined =>
-    validDecimal(context.sessionId) &&
-    validDecimal(context.userId) &&
-    /^[a-z0-9-]{1,32}$/.test(context.serverId)
-      ? (db
-          .prepare(
-            `SELECT s.id,s.server_id,s.user_id,u.username,u.display_name,s.expires_at
+  const sessionRow = async (
+    context: RequestContext,
+  ): Promise<SessionRow | undefined> => {
+    if (
+      !validDecimal(context.sessionId) ||
+      !validDecimal(context.userId) ||
+      !/^[a-z0-9-]{1,32}$/.test(context.serverId)
+    )
+      return undefined;
+    return (await db
+      .prepare(
+        `SELECT s.id,s.server_id,s.user_id,u.username,u.display_name,s.expires_at
     FROM sessions s JOIN users u ON u.server_id=s.server_id AND u.id=s.user_id
     WHERE s.id=? AND s.server_id=? AND s.user_id=? AND s.expires_at>?`,
-          )
-          .get(
-            BigInt(context.sessionId),
-            context.serverId,
-            BigInt(context.userId),
-            stableNow(clock).toISOString(),
-          ) as SessionRow | undefined)
-      : undefined;
+      )
+      .get(
+        BigInt(context.sessionId),
+        context.serverId,
+        BigInt(context.userId),
+        stableNow(clock).toISOString(),
+      )) as SessionRow | undefined;
+  };
   const jAuthSession = (context: RequestContext): JAuthSession | undefined => {
     const session = jAuthSessions.get(context);
     if (
@@ -276,15 +285,17 @@ export async function createIdentityService(
       return undefined;
     return session;
   };
-  const userById = (
+  const userById = async (
     serverId: string,
     userId: string,
-  ): { id: unknown; server_id: string; display_name: string } | undefined =>
-    db
+  ): Promise<
+    { id: unknown; server_id: string; display_name: string } | undefined
+  > =>
+    (await db
       .prepare(
         'SELECT id,server_id,display_name FROM users WHERE server_id=? AND id=?',
       )
-      .get(serverId, BigInt(userId)) as
+      .get(serverId, BigInt(userId))) as
       { id: unknown; server_id: string; display_name: string } | undefined;
   const authenticate = async (
     server: MailServer,
@@ -402,16 +413,18 @@ export async function createIdentityService(
     let user:
       { id: bigint; server_id: string; display_name: string } | undefined;
     try {
-      user = await db.run(() => {
-        db.prepare(
-          `INSERT INTO users(server_id,username,display_name,created_at) VALUES(?,?,?,?)
+      user = await db.run(async () => {
+        await db
+          .prepare(
+            `INSERT INTO users(server_id,username,display_name,created_at) VALUES(?,?,?,?)
           ON CONFLICT(server_id,username) DO UPDATE SET display_name=excluded.display_name`,
-        ).run(jAuthConfig.tenantId, username, displayName, now.toISOString());
-        return db
+          )
+          .run(jAuthConfig.tenantId, username, displayName, now.toISOString());
+        return (await db
           .prepare(
             'SELECT id,server_id,display_name FROM users WHERE server_id=? AND username=?',
           )
-          .get(jAuthConfig.tenantId, username) as
+          .get(jAuthConfig.tenantId, username)) as
           { id: bigint; server_id: string; display_name: string } | undefined;
       });
     } catch {
@@ -554,27 +567,31 @@ export async function createIdentityService(
         now.getTime() + config.sessionDays * 86_400_000,
       ).toISOString();
       try {
-        const saved = await db.run((tx) => {
-          db.prepare(
-            `INSERT INTO users(server_id,username,display_name,created_at) VALUES(?,?,?,?)
+        const saved = await db.run(async (tx) => {
+          await db
+            .prepare(
+              `INSERT INTO users(server_id,username,display_name,created_at) VALUES(?,?,?,?)
             ON CONFLICT(server_id,username) DO UPDATE SET display_name=excluded.display_name`,
-          ).run(
-            server.id,
-            authenticated!.canonicalUsername,
-            authenticated!.displayName,
-            now.toISOString(),
-          );
-          const user = db
+            )
+            .run(
+              server.id,
+              authenticated!.canonicalUsername,
+              authenticated!.displayName,
+              now.toISOString(),
+            );
+          const user = (await db
             .prepare(
               'SELECT id,server_id,display_name FROM users WHERE server_id=? AND username=?',
             )
-            .get(server.id, authenticated!.canonicalUsername) as
+            .get(server.id, authenticated!.canonicalUsername)) as
             { id: bigint; server_id: string; display_name: string } | undefined;
           if (!user) throw new IdentityError('internal');
-          db.prepare(
-            'INSERT INTO sessions(server_id,user_id,token_hash,expires_at,kind) VALUES(?,?,?,?,?)',
-          ).run(server.id, user.id, tokenHash, expiresAt, kind);
-          const sessionId = db.lastInsertId();
+          await db
+            .prepare(
+              'INSERT INTO sessions(server_id,user_id,token_hash,expires_at,kind) VALUES(?,?,?,?,?)',
+            )
+            .run(server.id, user.id, tokenHash, expiresAt, kind);
+          const sessionId = await db.lastInsertId();
           const output = featuresFor(user);
           tx.afterCommit(() =>
             safeEmit(
@@ -620,12 +637,12 @@ export async function createIdentityService(
         );
         throw new IdentityError('unauthorized');
       }
-      const row = db
+      const row = (await db
         .prepare(
           `SELECT s.id,s.server_id,s.user_id,s.expires_at FROM sessions s JOIN users u ON u.server_id=s.server_id AND u.id=s.user_id
         WHERE s.token_hash=? AND s.expires_at>?`,
         )
-        .get(sha256(input.credential), stableNow(clock).toISOString()) as
+        .get(sha256(input.credential), stableNow(clock).toISOString())) as
         | { id: bigint; server_id: string; user_id: bigint; expires_at: string }
         | undefined;
       if (!row) {
@@ -658,27 +675,28 @@ export async function createIdentityService(
     },
     async get(context: RequestContext) {
       if (jAuthMode) {
-        if (!jAuthSession(context)) throw new IdentityError('unauthorized');
-        const user = userById(context.serverId, context.userId);
+        if (!(await jAuthSession(context)))
+          throw new IdentityError('unauthorized');
+        const user = await userById(context.serverId, context.userId);
         if (!user) throw new IdentityError('unauthorized');
         return featuresFor(user);
       }
-      if (!sessionRow(context)) throw new IdentityError('unauthorized');
-      const user = userById(context.serverId, context.userId);
+      if (!(await sessionRow(context))) throw new IdentityError('unauthorized');
+      const user = await userById(context.serverId, context.userId);
       if (!user) throw new IdentityError('unauthorized');
       return featuresFor(user);
     },
-    logout(context: RequestContext) {
-      if (jAuthMode) return Promise.reject(new IdentityError('forbidden'));
+    async logout(context: RequestContext) {
+      if (jAuthMode) throw new IdentityError('forbidden');
       if (
         !validDecimal(context.sessionId) ||
         !validDecimal(context.userId) ||
         !/^[a-z0-9-]{1,32}$/.test(context.serverId)
       )
-        return Promise.resolve();
-      return db.run((tx) => {
+        return;
+      await db.run(async (tx) => {
         db.assertOwn(tx);
-        const changed = db
+        const changed = await db
           .prepare(
             'DELETE FROM sessions WHERE id=? AND server_id=? AND user_id=?',
           )
@@ -705,13 +723,13 @@ export async function createIdentityService(
         );
       });
     },
-    sessionActive(context: RequestContext) {
-      if (jAuthMode) return Boolean(jAuthSession(context));
-      return Boolean(sessionRow(context));
+    async sessionActive(context: RequestContext) {
+      if (jAuthMode) return Boolean(await jAuthSession(context));
+      return Boolean(await sessionRow(context));
     },
     async requireSameServer(context: RequestContext, userId: string) {
       if (!/^[1-9][0-9]*$/.test(userId)) throw new IdentityError('not_found');
-      const row = db
+      const row = await db
         .prepare('SELECT 1 AS found FROM users WHERE server_id=? AND id=?')
         .get(context.serverId, BigInt(userId));
       if (!row) throw new IdentityError('not_found');
@@ -731,11 +749,11 @@ export async function createIdentityService(
           context,
           stableNow(clock).getTime(),
         );
-      const rows = db
+      const rows = (await db
         .prepare(
           'SELECT id,display_name FROM users WHERE server_id=? AND id>? ORDER BY id LIMIT ?',
         )
-        .all(context.serverId, BigInt(after), limit + 1) as Array<{
+        .all(context.serverId, BigInt(after), limit + 1)) as Array<{
         id: bigint;
         display_name: string;
       }>;

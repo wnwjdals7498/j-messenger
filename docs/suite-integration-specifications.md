@@ -1,6 +1,6 @@
 # j-messenger 제품군 연결 기능 명세
 
-작성일: 2026-10-08. 상태: **M1 backend·실제 Keycloak HTTP/WSS 검증 완료; M5/M2/M3/M4 및 전체 인수 시험 미완료**. [연결 목록](suite-integration-features.md), [제품군 결정](../../j-groupware/docs/decisions.md), [공통 기준](../../j-groupware/docs/suite-feature-specifications.md)을 따른다. 기존 [메신저 명세](pmt-docs/10-feature-specifications.md)와 [실행 현황](pmt-docs/12-execution-status.md)을 보존한다. 기존 구현 완료와 이번 연결 완료는 구별한다.
+작성일: 2026-10-08. 상태: **M1·M5 backend·실제 Keycloak/PostgreSQL HTTP/WSS 검증 완료; M2/M3/M4 및 전체 인수 시험 미완료**. [연결 목록](suite-integration-features.md), [제품군 결정](../../j-groupware/docs/decisions.md), [공통 기준](../../j-groupware/docs/suite-feature-specifications.md)을 따른다. 기존 [메신저 명세](pmt-docs/10-feature-specifications.md)와 [실행 현황](pmt-docs/12-execution-status.md)을 보존한다. 기존 구현 완료와 이번 연결 완료는 구별한다.
 
 ## 입력·출력·연결 경계
 
@@ -44,3 +44,7 @@ M1에서 j-auth 모드의 HTTP/WSS 인증 어댑터와 공개/진단 route 예�
 ## M1 클라우드 구현 증거
 
 [고정 인증/tenant/문맥 계약과 실행 결과](cloud-j-auth-verification-2026-10-08.md)를 따른다. 기존 mail/development-fixed·SQLite와 standalone 앱 소스를 보존했다. MS-02~04는 실제 두 realm/회원의 HTTP/WSS로 확인했고, SQLite 기반 두 회원 메시지와 cursor 복구·BFF relay 종료도 확인했다. PostgreSQL 기반 MS-T01, client/화면 MS-T03, 고객 VM MS-T04의 완료는 별도다.
+
+## M5 클라우드 구현 증거
+
+[PostgreSQL 저장·명시적 SQLite 이관·rollback 범위·실제 시험](cloud-postgres-verification-2026-10-08.md)을 따른다. MS-T01의 격리 PG 업무·첨부·커서·backup과 M1 actual Keycloak HTTP/WSS를 실행했다. BFF 업무 HTTP·client/UI·고객 VM·전체 인수 완료와 구분한다.

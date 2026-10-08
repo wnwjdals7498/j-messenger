@@ -27,7 +27,7 @@ import type {
   TxContext,
   Uuid,
 } from '@j-messenger/contracts';
-import type { Database } from '../../platform/database/index.js';
+import { asStorage, type StorageInput } from '../../platform/storage/index.js';
 import type { JobHandler } from '@j-messenger/contracts';
 import type { JobStore } from '../../platform/jobs/index.js';
 
@@ -61,7 +61,7 @@ export interface FilePolicy {
   readonly minimumFreeBytes: number;
 }
 export interface FilesOptions {
-  readonly db: Database;
+  readonly db: StorageInput;
   readonly root: string;
   readonly tempRoot: string;
   readonly clock: Clock;
@@ -79,20 +79,20 @@ export interface FilesService extends FileCommands {
     tx: TxContext,
     context: RequestContext | SystemContext,
     messageId: string,
-  ): readonly Uuid[];
+  ): Promise<readonly Uuid[]>;
   getLiveFileIds(
     tx: TxContext,
     context: RequestContext,
     conversationId: string,
     fileIds: readonly Uuid[],
-  ): readonly FileDescriptor[];
+  ): Promise<readonly FileDescriptor[]>;
   expireBatch(
     tx: TxContext,
     context: SystemContext,
     cutoff: string,
     afterId: string,
     limit: number,
-  ): { fileIds: readonly string[]; lastId: string; hasMore: boolean };
+  ): Promise<{ fileIds: readonly string[]; lastId: string; hasMore: boolean }>;
 }
 interface FileRow {
   id: string;
@@ -210,6 +210,7 @@ const sniffStored = async (
   return true;
 };
 export function createFilesService(options: FilesOptions): FilesService {
+  const db = asStorage(options.db);
   if (
     !Number.isSafeInteger(options.policy.quotaBytes) ||
     options.policy.quotaBytes < FILE_MAX_BYTES ||
@@ -223,15 +224,15 @@ export function createFilesService(options: FilesOptions): FilesService {
       const s = await statfs(p);
       return Number(s.bavail * s.bsize);
     });
-  const lookup = (id: Uuid): FileRow | undefined =>
-    options.db.prepare('SELECT * FROM files WHERE id=?').get(id) as
+  const lookup = async (id: Uuid): Promise<FileRow | undefined> =>
+    (await db.prepare('SELECT * FROM files WHERE id=?').get(id)) as
       FileRow | undefined;
   const handler: JobHandler<{ fileId: Uuid }> = {
     kind: 'files.delete',
     async handle(job) {
       if (!job.payload || !validUuid(job.payload.fileId))
         return { status: 'failed', reason: 'invalid_reference' };
-      const row = lookup(job.payload.fileId);
+      const row = await lookup(job.payload.fileId);
       if (!row || row.state === 'deleted') return { status: 'completed' };
       if (row.state !== 'deleting')
         return {
@@ -263,10 +264,10 @@ export function createFilesService(options: FilesOptions): FilesService {
           reason: 'storage_error',
         };
       }
-      await options.db.run(() => {
-        const latest = lookup(job.payload.fileId);
+      await db.run(async () => {
+        const latest = await lookup(job.payload.fileId);
         if (latest?.state === 'deleting')
-          options.db
+          await db
             .prepare(
               "UPDATE files SET state='deleted',filename=NULL,mime_type='application/octet-stream',size_bytes=0,sha256=NULL,deleted_at=? WHERE id=? AND state='deleting'",
             )
@@ -289,16 +290,20 @@ export function createFilesService(options: FilesOptions): FilesService {
       return { status: 'completed' };
     },
   };
-  const scheduleDelete = (tx: TxContext, fileId: Uuid, reasonCode: string) => {
-    options.db.assertOwn(tx);
+  const scheduleDelete = async (
+    tx: TxContext,
+    fileId: Uuid,
+    reasonCode: string,
+  ): Promise<void> => {
+    db.assertOwn(tx);
     if (!/^[a-z][a-z0-9_]{0,63}$/.test(reasonCode))
       throw new DomainError('bad_request');
-    const row = lookup(fileId);
+    const row = await lookup(fileId);
     if (!row || row.state === 'deleted' || row.state === 'deleting') return;
-    options.db
+    await db
       .prepare("UPDATE files SET state='deleting',delete_reason=? WHERE id=?")
       .run(reasonCode, fileId);
-    options.jobs.enqueue(tx, {
+    await options.jobs.enqueue(tx, {
       kind: 'files.delete',
       payload: { fileId },
       serverId: row.server_id,
@@ -337,16 +342,16 @@ export function createFilesService(options: FilesOptions): FilesService {
         objectKey = randomUUID(),
         now = options.clock.now();
       if (!validUuid(id)) throw new DomainError('internal');
-      await options.db.run((tx) => {
+      await db.run(async (tx) => {
         options.access.recheckMember(tx, context, conversationId);
-        const used = options.db
+        const used = (await db
           .prepare(
             "SELECT COALESCE(SUM(size_bytes),0) AS n FROM files WHERE server_id=? AND state IN ('uploading','ready','attached','deleting')",
           )
-          .get(context.serverId) as { n: bigint };
+          .get(context.serverId)) as { n: bigint };
         if (Number(used.n) + reservedBytes > options.policy.quotaBytes)
           throw new DomainError('too_large');
-        options.db
+        await db
           .prepare(
             "INSERT INTO files(id,server_id,owner_user_id,conversation_id,filename,mime_type,size_bytes,object_key,state,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?, 'uploading',?,?)",
           )
@@ -398,8 +403,8 @@ export function createFilesService(options: FilesOptions): FilesService {
         )
           throw new DomainError('bad_request');
         await moveObject(temp, final);
-        await options.db.run(() => {
-          const changed = options.db
+        await db.run(async () => {
+          const changed = await db
             .prepare(
               "UPDATE files SET state='ready',sha256=?,size_bytes=? WHERE id=? AND state='uploading'",
             )
@@ -412,7 +417,7 @@ export function createFilesService(options: FilesOptions): FilesService {
           fileId: id,
           byteCount: bytes,
         });
-        const row = lookup(id);
+        const row = await lookup(id);
         if (!row) throw new DomainError('internal');
         return dto(row);
       } catch (error) {
@@ -427,13 +432,13 @@ export function createFilesService(options: FilesOptions): FilesService {
         throw error;
       }
     },
-    bind(tx: TxContext, context, conversationId, messageId, fileIds) {
-      options.db.assertOwn(tx);
+    async bind(tx: TxContext, context, conversationId, messageId, fileIds) {
+      db.assertOwn(tx);
       options.access.recheckMember(tx, context, conversationId);
       if (new Set(fileIds).size !== fileIds.length)
         throw new DomainError('bad_request');
       for (const id of fileIds) {
-        const row = lookup(id);
+        const row = await lookup(id);
         if (
           !row ||
           row.server_id !== context.serverId ||
@@ -442,7 +447,7 @@ export function createFilesService(options: FilesOptions): FilesService {
           row.state !== 'ready'
         )
           throw new DomainError('not_found');
-        const changed = options.db
+        const changed = await db
           .prepare(
             "UPDATE files SET state='attached',message_id=? WHERE id=? AND state='ready'",
           )
@@ -462,7 +467,7 @@ export function createFilesService(options: FilesOptions): FilesService {
       }
     },
     async openDownload(context, fileId) {
-      const row = lookup(fileId);
+      const row = await lookup(fileId);
       if (
         !row ||
         row.server_id !== context.serverId ||
@@ -521,23 +526,24 @@ export function createFilesService(options: FilesOptions): FilesService {
       const stale = new Date(
         options.clock.now().getTime() - 60 * 60_000,
       ).toISOString();
-      const rows = options.db
+      const rows = (await db
         .prepare(
           "SELECT id,object_key FROM files WHERE state='uploading' AND created_at<? ORDER BY created_at LIMIT ?",
         )
-        .all(stale, limit) as Array<{ id: string; object_key: string }>;
+        .all(stale, limit)) as Array<{ id: string; object_key: string }>;
       let removed = 0;
       for (const r of rows) {
         await rm(path.join(options.tempRoot, `${r.object_key}.part`), {
           force: true,
         });
         await rm(filePath(options.root, r.object_key), { force: true });
-        await options.db.run(() =>
-          options.db
-            .prepare(
-              "UPDATE files SET state='deleted',filename=NULL,mime_type='application/octet-stream',size_bytes=0,sha256=NULL,deleted_at=? WHERE id=? AND state='uploading'",
-            )
-            .run(options.clock.now().toISOString(), r.id),
+        await db.run(
+          async () =>
+            await db
+              .prepare(
+                "UPDATE files SET state='deleted',filename=NULL,mime_type='application/octet-stream',size_bytes=0,sha256=NULL,deleted_at=? WHERE id=? AND state='uploading'",
+              )
+              .run(options.clock.now().toISOString(), r.id),
         );
         removed++;
       }
@@ -546,25 +552,28 @@ export function createFilesService(options: FilesOptions): FilesService {
       });
       return { removed };
     },
-    attachedLiveIds(tx, context, messageId) {
-      options.db.assertOwn(tx);
+    async attachedLiveIds(tx, context, messageId) {
+      db.assertOwn(tx);
       if (!/^[1-9][0-9]*$/.test(messageId)) return [];
       const now = options.clock.now().toISOString();
-      const rows = options.db
+      const rows = (await db
         .prepare(
           "SELECT id FROM files WHERE server_id=? AND message_id=? AND state='attached' AND expires_at>? ORDER BY id",
         )
-        .all(context.serverId, BigInt(messageId), now) as Array<{ id: string }>;
+        .all(context.serverId, BigInt(messageId), now)) as Array<{
+        id: string;
+      }>;
       return rows.map((r) => r.id as Uuid);
     },
-    getLiveFileIds(tx, context, conversationId, fileIds) {
-      options.db.assertOwn(tx);
+    async getLiveFileIds(tx, context, conversationId, fileIds) {
+      db.assertOwn(tx);
       options.access.recheckMember(tx, context, conversationId as DecimalId);
       if (new Set(fileIds).size !== fileIds.length)
         throw new DomainError('bad_request');
       const now = options.clock.now().toISOString();
-      return fileIds.map((id) => {
-        const row = lookup(id);
+      const result: FileDescriptor[] = [];
+      for (const id of fileIds) {
+        const row = await lookup(id);
         if (
           !row ||
           row.server_id !== context.serverId ||
@@ -574,11 +583,12 @@ export function createFilesService(options: FilesOptions): FilesService {
           row.expires_at <= now
         )
           throw new DomainError('not_found');
-        return dto(row);
-      });
+        result.push(dto(row));
+      }
+      return result;
     },
-    expireBatch(tx, context, cutoff, afterId, limit) {
-      options.db.assertOwn(tx);
+    async expireBatch(tx, context, cutoff, afterId, limit) {
+      db.assertOwn(tx);
       if (
         !Number.isSafeInteger(limit) ||
         limit < 1 ||
@@ -587,16 +597,16 @@ export function createFilesService(options: FilesOptions): FilesService {
         !(/^(0|[1-9][0-9]*)$/.test(afterId) || validUuid(afterId))
       )
         throw new DomainError('bad_request');
-      const rows = options.db
+      const rows = (await db
         .prepare(
           "SELECT id FROM files WHERE server_id=? AND state IN ('ready','attached') AND created_at<=? AND id>? ORDER BY id LIMIT ?",
         )
-        .all(context.serverId, cutoff, afterId, limit + 1) as Array<{
+        .all(context.serverId, cutoff, afterId, limit + 1)) as Array<{
         id: string;
       }>;
       const batch = rows.slice(0, limit);
       for (const row of batch)
-        scheduleDelete(tx, row.id as Uuid, 'retention_expired');
+        await scheduleDelete(tx, row.id as Uuid, 'retention_expired');
       return {
         fileIds: batch.map((r) => r.id),
         lastId: batch.at(-1)?.id ?? afterId,

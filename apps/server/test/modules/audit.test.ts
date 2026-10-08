@@ -6,6 +6,10 @@ import type { Clock, RequestContext, Uuid } from '@j-messenger/contracts';
 import { MIGRATIONS } from '../../src/bootstrap/migrations.js';
 import { createDatabase } from '../../src/platform/database/index.js';
 import type { Database } from '../../src/platform/database/index.js';
+import {
+  asStorage,
+  type StorageDatabase,
+} from '../../src/platform/storage/index.js';
 import { createAuditService } from '../../src/modules/audit/index.js';
 
 class TestClock implements Clock {
@@ -21,7 +25,7 @@ const ctx = (server = 'dev-a', user = '1'): RequestContext => ({
   authenticatedAt: '2026-10-06T00:00:00.000Z',
 });
 describe('audit module', () => {
-  let dir: string, db: Database, clock: TestClock;
+  let dir: string, db: Database, storage: StorageDatabase, clock: TestClock;
   beforeEach(async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'jm-audit-'));
     clock = new TestClock();
@@ -29,6 +33,7 @@ describe('audit module', () => {
       migrations: MIGRATIONS,
       clock,
     });
+    storage = asStorage(db);
     await db.run(() =>
       db.prepare("INSERT INTO mail_servers VALUES('dev-a','dev-a')").run(),
     );
@@ -51,8 +56,8 @@ describe('audit module', () => {
       authorizeAdmin: async (c) => c.serverId === 'dev-a' && c.userId === '1',
     });
     await expect(
-      db.run((tx) => {
-        service.append(tx, ctx(), {
+      storage.run(async (tx) => {
+        await service.append(tx, ctx(), {
           action: 'files.delete',
           targetId: '00000000-0000-4000-8000-000000000001' as Uuid,
           metadata: { count: 1 },
@@ -60,7 +65,7 @@ describe('audit module', () => {
         throw new Error('rollback');
       }),
     ).rejects.toThrow('rollback');
-    await db.run((tx) =>
+    await storage.run((tx) =>
       service.appendSystem(
         tx,
         {
@@ -83,7 +88,7 @@ describe('audit module', () => {
   it('rejects free-form sensitive metadata before changing the transaction', async () => {
     const service = createAuditService({ db, clock });
     await expect(
-      db.run((tx) =>
+      storage.run((tx) =>
         service.append(tx, ctx(), {
           action: 'message.created',
           targetId: '1',

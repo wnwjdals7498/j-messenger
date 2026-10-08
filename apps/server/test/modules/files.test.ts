@@ -12,6 +12,10 @@ import type {
 import { MIGRATIONS } from '../../src/bootstrap/migrations.js';
 import { createDatabase } from '../../src/platform/database/index.js';
 import type { Database } from '../../src/platform/database/index.js';
+import {
+  asStorage,
+  type StorageDatabase,
+} from '../../src/platform/storage/index.js';
 import { createJobRunner, JobStore } from '../../src/platform/jobs/index.js';
 import { createFilesService } from '../../src/modules/files/index.js';
 
@@ -38,6 +42,7 @@ describe('files module', () => {
   let dir: string,
     db: Database,
     clock: TestClock,
+    storage: StorageDatabase,
     service: ReturnType<typeof createFilesService>;
   beforeEach(async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'jm-files-'));
@@ -46,6 +51,7 @@ describe('files module', () => {
       migrations: MIGRATIONS,
       clock,
     });
+    storage = asStorage(db);
     await db.run(() =>
       db.prepare("INSERT INTO mail_servers VALUES('dev-a','dev-a')").run(),
     );
@@ -127,14 +133,15 @@ describe('files module', () => {
     await expect(
       service.openDownload(context, descriptor.id),
     ).rejects.toThrow();
-    await db.run((tx) =>
-      service.bind(
-        tx,
-        context,
-        '1' as RequestContext['userId'],
-        '9' as RequestContext['userId'],
-        [descriptor.id],
-      ),
+    await storage.run(
+      async (tx) =>
+        await service.bind(
+          tx,
+          context,
+          '1' as RequestContext['userId'],
+          '9' as RequestContext['userId'],
+          [descriptor.id],
+        ),
     );
     const opened = await service.openDownload(context, descriptor.id);
     const pieces: Buffer[] = [];
@@ -171,16 +178,19 @@ describe('files module', () => {
         sizeBytes: 8,
         stream: stream(bytes),
       });
-    await db.run((tx) =>
-      service.bind(
-        tx,
-        context,
-        '1' as RequestContext['userId'],
-        '9' as RequestContext['userId'],
-        [f.id],
-      ),
+    await storage.run(
+      async (tx) =>
+        await service.bind(
+          tx,
+          context,
+          '1' as RequestContext['userId'],
+          '9' as RequestContext['userId'],
+          [f.id],
+        ),
     );
-    await db.run((tx) => service.scheduleDelete(tx, f.id, 'retention_expired'));
+    await storage.run((tx) =>
+      service.scheduleDelete(tx, f.id, 'retention_expired'),
+    );
     const job = db
       .prepare("SELECT id FROM platform_jobs WHERE kind='files.delete'")
       .get() as { id: Uuid };
@@ -244,14 +254,15 @@ describe('files module', () => {
       sizeBytes: 8,
       stream: stream(png(8)),
     });
-    await db.run((tx) =>
-      service.bind(
-        tx,
-        context,
-        '1' as RequestContext['userId'],
-        '9' as RequestContext['userId'],
-        [f.id],
-      ),
+    await storage.run(
+      async (tx) =>
+        await service.bind(
+          tx,
+          context,
+          '1' as RequestContext['userId'],
+          '9' as RequestContext['userId'],
+          [f.id],
+        ),
     );
     clock.value = new Date(clock.value.getTime() + 14 * 86400000);
     await expect(service.openDownload(context, f.id)).rejects.toMatchObject({
