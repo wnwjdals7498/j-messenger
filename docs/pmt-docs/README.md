@@ -16,6 +16,7 @@
 | [08 공식 근거](08-official-references.md) | 기술 사실을 확인한 공식 문서 |
 | [09 기능 목록](09-feature-list.md) | 필요한 47개 기능·담당 모듈·단계·요구 추적 |
 | [10 기능 명세서](10-feature-specifications.md) | 목표·입출력 항목 의미·기능확인 Test·로깅 방식 |
+| [제품군 연결 명세](../suite-integration-specifications.md) | j-auth Bearer·PostgreSQL·BFF 중계·client 패키지의 연결 계약과 인수 시험 |
 | [11 병렬 구현 상세계획](11-implementation-plan.md) | 6-luna 실행 카드·책임·선행·공통 계약·통합 게이트·인계 규칙 |
 | [12 실행 범위·상태](12-execution-status.md) | 최신 사용자 조건·현재 구현/검증·제외 범위 |
 | [13 VM 실행 기록](13-vm-deployment.md) | 실제 배포·TLS·journal·재부팅 검증·접속 주소·남은 조건 |

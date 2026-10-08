@@ -6,6 +6,8 @@ j-messenger를 j-groupware 제품군에 연결하기 위해 추가·변경해야
 
 작성일: 2026-10-07
 
+상세 연결 동작·입출력·실패 처리·인수 시험은 [제품군 연결 명세](suite-integration-specifications.md)를 따른다.
+
 | ID | 기능 | 핵심 동작 | 근거 | Item |
 | --- | --- | --- | --- | --- |
 | MS-01 | PostgreSQL 전환 | SQLite → `jgw_messenger`(전용 계정), `pg`·node-pg-migrate SQL 파일, 기존 서버 테스트 통과 | S2·S9 | M5 |
