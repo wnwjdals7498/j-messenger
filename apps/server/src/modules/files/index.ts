@@ -73,6 +73,22 @@ export interface FilesOptions {
   readonly diskFreeBytes?: (path: string) => Promise<number>;
 }
 export interface FilesService extends FileCommands {
+  /** Internal offline backup metadata; paths and file bytes stay private. */
+  listBackupReferences(): Promise<
+    readonly {
+      id: string;
+      objectKey: string;
+      storagePath: string;
+      sha256: string;
+      serverId: string;
+      conversationId: string;
+      messageId: string | null;
+      state: 'ready' | 'attached' | 'deleting';
+      createdAt: string;
+      expiresAt: string;
+      bytes: number;
+    }[]
+  >;
   readonly deleteHandler: JobHandler<{ fileId: Uuid }>;
   reconcileOrphans(limit: number): Promise<{ removed: number }>;
   attachedLiveIds(
@@ -103,6 +119,7 @@ interface FileRow {
   mime_type: string;
   size_bytes: bigint;
   object_key: string;
+  sha256: string | null;
   state: 'uploading' | 'ready' | 'attached' | 'deleting' | 'deleted';
   created_at: string;
   expires_at: string;
@@ -311,6 +328,41 @@ export function createFilesService(options: FilesOptions): FilesService {
     });
   };
   return {
+    async listBackupReferences() {
+      const rows = (await db
+        .prepare("SELECT * FROM files WHERE state != 'deleted' ORDER BY id")
+        .all()) as unknown as FileRow[];
+      return rows.map((row) => {
+        if (
+          (row.state !== 'ready' &&
+            row.state !== 'attached' &&
+            row.state !== 'deleting') ||
+          !row.sha256 ||
+          !/^[a-f0-9]{64}$/.test(row.sha256) ||
+          !validUuid(row.object_key)
+        )
+          throw new DomainError('unavailable');
+        const bytes = Number(row.size_bytes);
+        if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > FILE_MAX_BYTES)
+          throw new DomainError('unavailable');
+        return {
+          id: row.id,
+          objectKey: row.object_key,
+          storagePath: path.posix.join(
+            row.object_key.slice(0, 2),
+            row.object_key,
+          ),
+          sha256: row.sha256,
+          state: row.state,
+          serverId: row.server_id,
+          conversationId: String(row.conversation_id),
+          messageId: row.message_id === null ? null : String(row.message_id),
+          createdAt: row.created_at,
+          expiresAt: row.expires_at,
+          bytes,
+        };
+      });
+    },
     async prepare(context, conversationId, input) {
       await options.access.requireMember(context, conversationId);
       if (

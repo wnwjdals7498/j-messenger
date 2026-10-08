@@ -28,6 +28,16 @@ export interface FilesPort extends Pick<FileCommands, 'bind'> {
   ): readonly Uuid[] | Promise<readonly Uuid[]>;
 }
 export interface MessageService extends MessageCommandsSurface, MessageQueries {
+  /** Offline recovery integrity; file ownership supplies the reference metadata. */
+  verifyAttachmentReferences(
+    files: readonly {
+      id: string;
+      serverId: string;
+      conversationId: string;
+      messageId: string | null;
+      state: string;
+    }[],
+  ): Promise<void>;
   validateMessage(
     tx: TxContext,
     context: RequestContext,
@@ -410,6 +420,42 @@ export function createMessageService(options: MessageOptions): MessageService {
   };
 
   return {
+    async verifyAttachmentReferences(files) {
+      const references = new Map(files.map((file) => [file.id, file]));
+      if (references.size !== files.length)
+        throw new MessageError('unavailable');
+      const rows = (await db
+        .prepare(
+          'SELECT mf.server_id,mf.message_id,mf.file_id,m.conversation_id FROM message_files mf LEFT JOIN messages m ON m.server_id=mf.server_id AND m.id=mf.message_id ORDER BY mf.file_id',
+        )
+        .all()) as unknown as {
+        server_id: string;
+        message_id: bigint;
+        file_id: string;
+        conversation_id: bigint | null;
+      }[];
+      const associated = new Set<string>();
+      for (const row of rows) {
+        const file = references.get(row.file_id);
+        if (
+          !file ||
+          file.state !== 'attached' ||
+          file.serverId !== row.server_id ||
+          file.messageId !== String(row.message_id) ||
+          row.conversation_id === null ||
+          file.conversationId !== String(row.conversation_id) ||
+          associated.has(row.file_id)
+        )
+          throw new MessageError('unavailable');
+        associated.add(row.file_id);
+      }
+      if (
+        files.some(
+          (file) => file.state === 'attached' && !associated.has(file.id),
+        )
+      )
+        throw new MessageError('unavailable');
+    },
     validateMessage,
     purgeExpiredBatch(tx, system, cutoff, afterId, limit) {
       return purgeBatch(tx, system, cutoff, afterId, limit);

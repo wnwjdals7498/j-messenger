@@ -3,6 +3,7 @@ export default defineConfig({
   test: {
     include: [
       'apps/server/integration/postgres.integration.ts',
+      'apps/server/integration/postgres-recovery.integration.ts',
       'apps/server/test/bootstrap/application.integration.test.ts',
     ],
     fileParallelism: false,

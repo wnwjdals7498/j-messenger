@@ -69,3 +69,7 @@
 ## 2026-10-08 제품군 M2/MS-05 후속
 
 [정확 registry 소비 검증](../cloud-client-registry-verification-2026-10-08.md)을 추가했다. core/react/contracts0.2.0을 격리 loopback에 최초 게시하고 새 consumer의 SHA-512/lock·공개 타입·CSS bundle·React 한 인스턴스·중복 게시 거절을 Node24와22.18에서 실제 검증했다. 기존 standalone 소스/검사를 보존했다. MS-07/08·정식 UI/VM·전체 인수는 후속이고 PMT 기록은 도구/경로 부재로 미실행이다.
+
+## 2026-10-08 첨부 BFF·PG 파일 포함 복구 후속
+
+[파일 포함 PG 복구 기록](../cloud-postgres-recovery-verification-2026-10-08.md)과 [groupware 첨부 BFF 기록](../../../j-groupware/docs/cloud-messenger-files-verification-2026-10-08.md)을 추가했다. 첨부 BFF/실제 보존과 offline 복구의 실행 범위를 기록하며 실제 저장 shard 경로 검증을 final gate로 둔다. 정식 UI·앱 동결 배포 profile·실제 서비스 lifecycle/VM 인수·Windows PMT 기록은 완료로 표시하지 않는다.

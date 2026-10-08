@@ -68,6 +68,8 @@ export interface IdentityService extends SessionResolver, UserDirectory {
   get(context: RequestContext): Promise<CurrentUserDto>;
   logout(context: RequestContext): Promise<void>;
   sessionActive(context: RequestContext): Promise<boolean>;
+  /** Offline recovery only; caller keeps every public transport stopped. */
+  revokeAllSessions(): Promise<number>;
 }
 export class IdentityError extends DomainError {
   constructor(
@@ -457,6 +459,13 @@ export async function createIdentityService(
     return context;
   };
   return {
+    async revokeAllSessions() {
+      return db.run(async (tx) => {
+        db.assertOwn(tx);
+        const changed = await db.prepare('DELETE FROM sessions').run();
+        return Number(changed.changes);
+      });
+    },
     listServers() {
       const result = servers.map((server) => ({
         id: server.id as ServerDto['id'],

@@ -36,3 +36,7 @@ PG `backup()`은 PATH의 호환 `pg_dump`로 전용 schema custom archive를 생
 ## 공식 근거
 
 [node-postgres transaction](https://node-postgres.com/features/transactions), [PG18 sequence](https://www.postgresql.org/docs/18/functions-sequence.html), [advisory lock](https://www.postgresql.org/docs/18/explicit-locking.html), [node-pg-migrate API](https://salsita.github.io/node-pg-migrate/migrations/)를 확인했다. 설치 package의 Node>=20.11·pg<9 peer 범위와 프로젝트 Node22.18의 실제 실행을 확인했다.
+
+## 2026-10-08 파일 포함 offline 복구 후속
+
+위 수동 archive/FILE_ROOT 병행 안내 이후 [PG 파일 포함 복구 기록](cloud-postgres-recovery-verification-2026-10-08.md)을 추가했다. file/message/retention/identity 공개 port를 조립해 manifest 검증·현재 보존·로컬 세션 폐기·cursor 회전·직전 DB/전체 FILE_ROOT 실패 복구를 수행한다. 실제 운영 stop/restart·공용 lock·VM 인수 연결은 여전히 미완료이며 자동 시작에서 복원하지 않는다.

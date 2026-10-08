@@ -68,6 +68,7 @@ const days = (d: number) => d * 86_400_000;
 export function createRetentionService(
   options: RetentionOptions,
 ): RetentionCommands & {
+  applyCurrentPolicy(context: SystemContext): Promise<void>;
   runSystemBatch(
     context: SystemContext,
     limit: number,
@@ -115,6 +116,29 @@ export function createRetentionService(
         }
       | undefined;
   return {
+    /** Offline recovery re-applies the current policy before public access. */
+    async applyCurrentPolicy(context: SystemContext) {
+      if (!/^[a-z0-9-]{1,32}$/.test(context.serverId))
+        throw new DomainError('bad_request');
+      await db.run(async (tx) => {
+        db.assertOwn(tx);
+        const old = await policy(context.serverId);
+        await db
+          .prepare(
+            'INSERT INTO retention_policies(server_id,message_days,file_days,version,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(server_id) DO UPDATE SET message_days=excluded.message_days,file_days=excluded.file_days,version=excluded.version,updated_at=excluded.updated_at',
+          )
+          .run(
+            context.serverId,
+            5,
+            14,
+            old.version + 1,
+            options.clock.now().toISOString(),
+          );
+        await db
+          .prepare('DELETE FROM retention_progress WHERE server_id=?')
+          .run(context.serverId);
+      });
+    },
     async get(context) {
       await authorize(context);
       return await policy(context.serverId);
