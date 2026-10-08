@@ -16,6 +16,7 @@
     "check:foundation": "npm run typecheck:foundation --workspace=@j-messenger/server && npm run test:foundation --workspace=@j-messenger/server",
     "check:server": "npm run check --workspace=@j-messenger/server",
     "test:postgres": "node scripts/run-postgres-integration.mjs",
+    "test:registry": "npm run build && node --test tests/registry/client-packages.test.mjs",
     "import:sqlite": "node apps/server/dist/bootstrap/import-main.js",
     "check:client": "npm run check --workspace=@j-messenger/client-core",
     "check:ui": "npm run check --workspace=@j-messenger/client-react",

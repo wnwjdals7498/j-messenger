@@ -65,3 +65,7 @@
 ## 2026-10-08 제품군 M2 transport 후속
 
 [BFF client 연결 기록](../cloud-bff-client-verification-2026-10-08.md)을 추가했다. client-core17개와 실제 PG/Keycloak/BFF HTTP/WSS14개가 통과했다. 기존 native 주소를 보존했고 그룹웨어 helper는 고정 BFF 주소·쿠키·매 변경 요청 CSRF를 사용한다. registry 게시·정식 UI·고객 VM·전체 인수는 아직 미완료다. PMT 도구와 Windows 상태 경로는 없어 이 문서로 실행 범위만 기록한다.
+
+## 2026-10-08 제품군 M2/MS-05 후속
+
+[정확 registry 소비 검증](../cloud-client-registry-verification-2026-10-08.md)을 추가했다. core/react/contracts0.2.0을 격리 loopback에 최초 게시하고 새 consumer의 SHA-512/lock·공개 타입·CSS bundle·React 한 인스턴스·중복 게시 거절을 Node24와22.18에서 실제 검증했다. 기존 standalone 소스/검사를 보존했다. MS-07/08·정식 UI/VM·전체 인수는 후속이고 PMT 기록은 도구/경로 부재로 미실행이다.

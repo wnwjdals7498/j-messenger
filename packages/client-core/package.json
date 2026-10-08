@@ -1,8 +1,16 @@
 {
   "name": "@j-messenger/client-core",
-  "private": true,
   "version": "0.2.0",
   "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "registry": "http://127.0.0.1:4873/"
+  },
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

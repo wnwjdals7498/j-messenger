@@ -1,13 +1,24 @@
 {
   "name": "@j-messenger/client-react",
-  "private": true,
   "version": "0.2.0",
   "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "registry": "http://127.0.0.1:4873/"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./styles.css": "./dist/messenger.css"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node ../../scripts/copy-package-assets.mjs",
@@ -17,7 +28,9 @@
   },
   "dependencies": {
     "@j-messenger/contracts": "0.2.0",
-    "@j-messenger/client-core": "0.2.0",
+    "@j-messenger/client-core": "0.2.0"
+  },
+  "peerDependencies": {
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

@@ -52,3 +52,7 @@ M1에서 j-auth 모드의 HTTP/WSS 인증 어댑터와 공개/진단 route 예�
 ## M2 BFF transport 클라우드 증거
 
 [공개 client helper와 실제 BFF 경로](cloud-bff-client-verification-2026-10-08.md)를 추가했다. MS-06의 HTTP/WSS 주소·쿠키/CSRF 경계와 실제 backend 연결을 구현했다. MS-05 registry 게시·설치, MS-07 정식 UI 토큰과 MS-T03 화면 인수는 미완료다.
+
+## M2/MS-05 registry 후속
+
+[공유3개 패키지0.2.0의 실제 게시·설치·무결성·공개 타입·CSS 번들](cloud-client-registry-verification-2026-10-08.md)을 검증했다. Node24와 최소 Node22.18에서 새 consumer 시험1개가 통과했다. MS-05의 패키지 게시/정확 설치 구현과 MS-T03 정식 그룹웨어 UI/VM 인수는 구분한다. 기존 standalone 앱은 보존하며 MS-07/08은 후속이다.
