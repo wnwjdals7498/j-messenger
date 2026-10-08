@@ -48,3 +48,7 @@ M1에서 j-auth 모드의 HTTP/WSS 인증 어댑터와 공개/진단 route 예�
 ## M5 클라우드 구현 증거
 
 [PostgreSQL 저장·명시적 SQLite 이관·rollback 범위·실제 시험](cloud-postgres-verification-2026-10-08.md)을 따른다. MS-T01의 격리 PG 업무·첨부·커서·backup과 M1 actual Keycloak HTTP/WSS를 실행했다. BFF 업무 HTTP·client/UI·고객 VM·전체 인수 완료와 구분한다.
+
+## M2 BFF transport 클라우드 증거
+
+[공개 client helper와 실제 BFF 경로](cloud-bff-client-verification-2026-10-08.md)를 추가했다. MS-06의 HTTP/WSS 주소·쿠키/CSRF 경계와 실제 backend 연결을 구현했다. MS-05 registry 게시·설치, MS-07 정식 UI 토큰과 MS-T03 화면 인수는 미완료다.

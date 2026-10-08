@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createMessengerClient, type MessengerOptions } from '../src/index.js';
+import {
+  createGroupwareMessengerClient,
+  createMessengerClient,
+  type MessengerOptions,
+} from '../src/index.js';
 
 const me = {
   id: '9007199254740993',
@@ -60,6 +64,144 @@ class FakeClock {
 }
 
 describe('client-core', () => {
+  it('routes Groupware BFF HTTP and WebSocket traffic to the frozen endpoints', async () => {
+    const requests: Request[] = [];
+    const socketUrls: string[] = [];
+    const socket = {
+      send: () => undefined,
+      close: () => undefined,
+      onMessage: () => () => undefined,
+      onClose: () => () => undefined,
+    };
+    const client = createGroupwareMessengerClient({
+      origin: 'https://messenger.example.test',
+      csrfToken: () => 'csrf-value',
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        if (request.url.endsWith('/me')) return response({ data: me });
+        if (request.url.endsWith('/conversations'))
+          return response({
+            data: [],
+            page: { nextCursor: null },
+            snapshotCursor: 'opaque-snapshot',
+            snapshotPosition: '0',
+          });
+        return response({ data: [] });
+      }) as typeof fetch,
+      socketFactory: (url) => {
+        socketUrls.push(url);
+        return socket;
+      },
+    });
+    try {
+      await expect(client.resumeSession()).resolves.toEqual(me);
+      expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+        '/api/messenger/api/v1/me',
+        '/api/messenger/api/v1/conversations',
+      ]);
+      expect(
+        requests.every((request) => request.credentials === 'include'),
+      ).toBe(true);
+      expect(socketUrls).toEqual([
+        'wss://messenger.example.test/api/messenger/ws',
+      ]);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it('fetches a fresh CSRF token for each mutation and never sends Authorization', async () => {
+    const requests: Request[] = [];
+    let tokenNumber = 0;
+    const client = createGroupwareMessengerClient({
+      origin: 'https://messenger.example.test',
+      csrfToken: () => `csrf-${++tokenNumber}`,
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        return response({ data: {} });
+      }) as typeof fetch,
+    });
+    try {
+      await client.advanceRead('10' as never, '20' as never);
+      await client.updateRetention({ messageDays: 5, fileDays: 14 });
+      expect(
+        requests.map((request) => request.headers.get('x-csrf-token')),
+      ).toEqual(['csrf-1', 'csrf-2']);
+      expect(requests.map((request) => request.credentials)).toEqual([
+        'include',
+        'include',
+      ]);
+      expect(
+        requests.every(
+          (request) => request.headers.get('authorization') === null,
+        ),
+      ).toBe(true);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it('fails a mutation before fetch when the CSRF callback has no token', async () => {
+    let fetchCount = 0;
+    const client = createGroupwareMessengerClient({
+      origin: 'https://messenger.example.test',
+      csrfToken: () => null,
+      fetch: (async () => {
+        fetchCount++;
+        return response({ data: {} });
+      }) as typeof fetch,
+    });
+    try {
+      await expect(
+        client.advanceRead('10' as never, '20' as never),
+      ).rejects.toMatchObject({ code: 'forbidden' });
+      expect(fetchCount).toBe(0);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it('rejects invalid origins and a BFF origin that differs from the browser', () => {
+    const options = {
+      csrfToken: () => 'csrf-value',
+      fetch: (async () => response({ data: {} })) as typeof fetch,
+    };
+    for (const origin of [
+      'http://messenger.example.test',
+      'https://user:secret@messenger.example.test',
+      'https://messenger.example.test/path',
+      'https://messenger.example.test?query=1',
+      'https://messenger.example.test#fragment',
+      'https://127.0.0.1:3001',
+    ])
+      expect(() =>
+        createGroupwareMessengerClient({ ...options, origin }),
+      ).toThrow(TypeError);
+
+    const originalLocation = Object.getOwnPropertyDescriptor(
+      globalThis,
+      'location',
+    );
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      value: { origin: 'https://other.example.test' },
+    });
+    try {
+      expect(() =>
+        createGroupwareMessengerClient({
+          ...options,
+          origin: 'https://messenger.example.test',
+        }),
+      ).toThrow(/current browser origin/);
+    } finally {
+      if (originalLocation)
+        Object.defineProperty(globalThis, 'location', originalLocation);
+      else Reflect.deleteProperty(globalThis, 'location');
+    }
+  });
+
   it('restores an existing session without sending a password or creating a new session', async () => {
     const calls: Request[] = [];
     const c = fixture((async (input: RequestInfo | URL, init?: RequestInit) => {

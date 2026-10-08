@@ -54,6 +54,7 @@ export interface ClientSocket {
 }
 export interface MessengerOptions {
   baseUrl?: string;
+  websocketUrl?: string;
   requestTimeoutMs?: number;
   fetch?: typeof globalThis.fetch;
   socketFactory?: (url: string) => ClientSocket;
@@ -200,8 +201,9 @@ export function createMessengerClient(options: MessengerOptions = {}) {
         fetcher(`${base}${path}`, { ...init, signal: controller.signal }),
         timeout,
       ]);
-    } catch {
+    } catch (error) {
       if (timedOut) throw new ClientError('timeout');
+      if (error instanceof ClientError) throw error;
       throw new ClientError('network');
     } finally {
       if (timeoutHandle !== null) clock.clearTimeout(timeoutHandle);
@@ -530,9 +532,9 @@ export function createMessengerClient(options: MessengerOptions = {}) {
   function connect(g: number, attempt = 0) {
     if (!options.socketFactory || !current(g)) return;
     disconnect();
-    const url = base
-      .replace(/^http/, 'ws')
-      .replace(/\/api\/v1\/?$/, '/api/v1/events');
+    const url =
+      options.websocketUrl ??
+      base.replace(/^http/, 'ws').replace(/\/api\/v1\/?$/, '/api/v1/events');
     const ws = options.socketFactory(url);
     socket = ws;
     let ready = false;
@@ -967,7 +969,8 @@ export function createMessengerClient(options: MessengerOptions = {}) {
           `${base}/conversations/${encodeURIComponent(conversationId)}/files`,
           { method: 'POST', credentials: 'include', body: form },
         );
-      } catch {
+      } catch (error) {
+        if (error instanceof ClientError) throw error;
         throw new ClientError('network');
       }
       if (!current(g)) throw new ClientError('unauthorized');
@@ -995,7 +998,8 @@ export function createMessengerClient(options: MessengerOptions = {}) {
         res = await fetcher(`${base}/files/${encodeURIComponent(id)}/content`, {
           credentials: 'include',
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof ClientError) throw error;
         throw new ClientError('network');
       }
       if (!current(g)) throw new ClientError('unauthorized');
@@ -1047,4 +1051,91 @@ export function createMessengerClient(options: MessengerOptions = {}) {
   };
   visibilitySource?.addEventListener('visibilitychange', visibilityListener);
   return Object.freeze(api);
+}
+
+export interface GroupwareMessengerOptions extends Omit<
+  MessengerOptions,
+  'baseUrl' | 'websocketUrl'
+> {
+  readonly origin: string;
+  readonly csrfToken: () => string | null | undefined;
+}
+
+/** Uses the same-origin Groupware BFF transport without exposing bearer credentials. */
+export function createGroupwareMessengerClient(
+  options: GroupwareMessengerOptions,
+) {
+  let origin: URL;
+  try {
+    origin = new URL(options.origin);
+  } catch {
+    throw new TypeError('origin must be an HTTPS origin');
+  }
+  if (
+    origin.protocol !== 'https:' ||
+    origin.origin !== options.origin ||
+    origin.username !== '' ||
+    origin.password !== '' ||
+    origin.search !== '' ||
+    origin.hash !== '' ||
+    (origin.pathname !== '/' && origin.pathname !== '') ||
+    origin.port === '3001'
+  )
+    throw new TypeError(
+      'origin must be a canonical HTTPS origin without a path',
+    );
+  if (
+    typeof globalThis.location !== 'undefined' &&
+    globalThis.location.origin !== origin.origin
+  )
+    throw new TypeError('origin must match the current browser origin');
+
+  const apiPath = '/api/messenger/api/v1';
+  const bffBase = `${origin.origin}/api/messenger`;
+  const defaultFetch = globalThis.fetch.bind(globalThis);
+  const fetcher = options.fetch ?? defaultFetch;
+  const restrictedFetch: typeof globalThis.fetch = async (input, init) => {
+    const request = input instanceof Request ? input : undefined;
+    let target: URL;
+    try {
+      target = new URL(request?.url ?? String(input), `${origin.origin}/`);
+    } catch {
+      throw new ClientError('forbidden');
+    }
+    if (
+      target.origin !== origin.origin ||
+      target.username !== '' ||
+      target.password !== '' ||
+      (target.pathname !== apiPath &&
+        !target.pathname.startsWith(`${apiPath}/`))
+    )
+      throw new ClientError('forbidden');
+
+    const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
+    const headers = new Headers(request?.headers);
+    new Headers(init?.headers).forEach((value, name) =>
+      headers.set(name, value),
+    );
+    headers.delete('authorization');
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      const csrf = options.csrfToken();
+      if (typeof csrf !== 'string' || csrf.trim().length === 0)
+        throw new ClientError('forbidden');
+      headers.set('x-csrf-token', csrf);
+    }
+
+    return fetcher(input, {
+      ...init,
+      method,
+      headers,
+      credentials: 'include',
+    });
+  };
+  const { origin: _origin, csrfToken: _csrfToken, ...clientOptions } = options;
+  return createMessengerClient({
+    ...clientOptions,
+    baseUrl: bffBase,
+    websocketUrl: `${origin.protocol === 'https:' ? 'wss:' : 'ws:'}//${origin.host}/api/messenger/ws`,
+    fetch: restrictedFetch,
+  });
 }
