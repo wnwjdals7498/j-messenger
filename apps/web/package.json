@@ -13,7 +13,7 @@
   "dependencies": {
     "@j-messenger/contracts": "0.2.0",
     "@j-messenger/client-core": "0.2.0",
-    "@j-messenger/client-react": "0.2.0",
+    "@j-messenger/client-react": "0.2.2",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
