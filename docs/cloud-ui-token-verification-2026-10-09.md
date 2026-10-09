@@ -19,3 +19,10 @@ Node 22.18.0·24.19.0에서 각각 `npm run check --workspace=@j-messenger/clien
 `task25-ms-public-ui-final-build22.log/.exit`,
 `task25-ui-public-final22.log/.exit`, `task25-ui-public-final24.log/.exit`다.
 모두 exit 0이다. 초기 브라우저 경로 실패와 캐시는 별도로 보존했다.
+
+추가로 기존 fresh registry consumer 시험의 0.2.0 고정 전제를 각 패키지의
+현재 정확 버전으로 바꿨다. Node 22/24에서 source pack SHA-512와 registry
+integrity 일치, 신규 소비자 설치·공개 타입 검사·브라우저 build·CSS 공통 토큰
+보존·React 단일 인스턴스·중복 버전 게시 거절을 각각 확인했다. 최종 읽기
+전용 소비자 실행 로그는 `task25-ms-registry-owned-final22.log/.exit`와
+`task25-ms-registry-owned-final24.log/.exit`이며 각 1개 시험·exit 0이다.

@@ -93,9 +93,15 @@ test(
           'Shared packages must actually be published.',
         );
         const document = await response.json(),
-          manifest = document.versions['0.2.0'];
+          version = JSON.parse(
+            await readFile(
+              path.join(root, 'packages', name, 'package.json'),
+              'utf8',
+            ),
+          ).version,
+          manifest = document.versions[version];
         assert.equal(manifest.name, '@j-messenger/' + name);
-        assert.equal(manifest.version, '0.2.0');
+        assert.equal(manifest.version, version);
         const packed = JSON.parse(
           await npm([
             'pack',
@@ -141,8 +147,8 @@ test(
           private: true,
           type: 'module',
           dependencies: {
-            '@j-messenger/client-core': '0.2.0',
-            '@j-messenger/client-react': '0.2.0',
+            '@j-messenger/client-core': metadata['client-core'].version,
+            '@j-messenger/client-react': metadata['client-react'].version,
             react: '19.3.0',
             'react-dom': '19.3.0',
           },
@@ -158,7 +164,7 @@ test(
       );
       for (const name of ['contracts', 'client-core', 'client-react']) {
         const entry = lock.packages['node_modules/@j-messenger/' + name];
-        assert.equal(entry.version, '0.2.0');
+        assert.equal(entry.version, metadata[name].version);
         assert.equal(new URL(entry.resolved).origin, new URL(registry).origin);
         assert.equal(entry.integrity, metadata[name].dist.integrity);
       }
@@ -247,6 +253,17 @@ createRoot(document.getElementById('root')!).render(createElement(MessengerApp,{
         assets.some((name) => name.endsWith('.css')),
         'Published CSS must survive consumer bundling.',
       );
+      const css = (
+        await Promise.all(
+          assets
+            .filter((name) => name.endsWith('.css'))
+            .map((name) =>
+              readFile(path.join(temporary, 'dist/assets', name), 'utf8'),
+            ),
+        )
+      ).join('\n');
+      assert.match(css, /var\(--jgw-color-primary/);
+      assert.match(css, /var\(--jgw-color-surface/);
       const duplicate = await run(
         [
           path.resolve(root, '../j-groupware/scripts/registry-publish.mjs'),
